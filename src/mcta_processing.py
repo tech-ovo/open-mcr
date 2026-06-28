@@ -3,8 +3,8 @@ import pathlib
 from datetime import datetime
 import itertools
 
-from data_exporting import format_timestamp_for_file, save_csv, OutputSheet
-import list_utils
+from .data_exporting import format_timestamp_for_file, save_csv, OutputSheet
+from . import list_utils
 
 """Support for additional outputs used by the Multiple Choice Test Analysis software."""
 

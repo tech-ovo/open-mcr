@@ -7,8 +7,8 @@ import typing as tp
 import cv2
 import numpy as np
 
-import list_utils
-import math_utils
+from . import list_utils
+from . import math_utils
 
 
 class Point:
@@ -196,35 +196,61 @@ class ChangeOfBasisTransformer():
     """Transforms points to/from their 2D coordinate system into a new one, such that the passed
     `origin` point becomes `0.0`, the `bottom_left` point becomes `0,1`, and the `bottom_right`
     point because `1,1`."""
-    def __init__(self, origin: Point, bottom_left: Point, bottom_right: Point):
-        target_origin = Point(0, 0)
-        target_bl = Point(0, 1)
-        target_br = Point(1, 1)
-        target_matrix = np.array([[target_origin.x], [target_bl.x], [target_br.x],
-                                [target_origin.y], [target_bl.y], [target_br.y]],
+    def __init__(self, origin: Point, bottom_left: Point, bottom_right: Point, top_right: tp.Optional[Point] = None):
+        self._is_perspective = top_right is not None
+        if self._is_perspective:
+            assert top_right is not None
+            src_pts = np.array([
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [1.0, 1.0],
+                [0.0, 1.0]
+            ], dtype=np.float32)
+            dst_pts = np.array([
+                [origin.x, origin.y],
+                [top_right.x, top_right.y],
+                [bottom_right.x, bottom_right.y],
+                [bottom_left.x, bottom_left.y]
+            ], dtype=np.float32)
+            self._H_from_basis = cv2.getPerspectiveTransform(src_pts, dst_pts)
+            self._H_to_basis = np.linalg.inv(self._H_from_basis)
+        else:
+            target_origin = Point(0, 0)
+            target_bl = Point(0, 1)
+            target_br = Point(1, 1)
+            target_matrix = np.array([[target_origin.x], [target_bl.x], [target_br.x],
+                                    [target_origin.y], [target_bl.y], [target_br.y]],
+                                    float)
+
+            from_matrix = np.array([[origin.x, origin.y, 1, 0, 0, 0],
+                                    [bottom_left.x, bottom_left.y, 1, 0, 0, 0],
+                                    [bottom_right.x, bottom_right.y, 1, 0, 0, 0],
+                                    [0, 0, 0, origin.x, origin.y, 1],
+                                    [0, 0, 0, bottom_left.x, bottom_left.y, 1],
+                                    [0, 0, 0, bottom_right.x, bottom_right.y, 1]],
                                 float)
 
-        from_matrix = np.array([[origin.x, origin.y, 1, 0, 0, 0],
-                                [bottom_left.x, bottom_left.y, 1, 0, 0, 0],
-                                [bottom_right.x, bottom_right.y, 1, 0, 0, 0],
-                                [0, 0, 0, origin.x, origin.y, 1],
-                                [0, 0, 0, bottom_left.x, bottom_left.y, 1],
-                                [0, 0, 0, bottom_right.x, bottom_right.y, 1]],
-                            float)
-
-        result = np.matmul(np.linalg.inv(from_matrix), target_matrix)
-        self._transformation_matrix = np.array([[result[0][0], result[1][0]],
-                                        [result[3][0], result[4][0]]])
-        self._transformation_matrix_inv = np.linalg.inv(self._transformation_matrix)
-        self._rotation_matrix = np.array([[result[2][0]], [result[5][0]]])
+            result = np.matmul(np.linalg.inv(from_matrix), target_matrix)
+            self._transformation_matrix = np.array([[result[0][0], result[1][0]],
+                                            [result[3][0], result[4][0]]])
+            self._transformation_matrix_inv = np.linalg.inv(self._transformation_matrix)
+            self._rotation_matrix = np.array([[result[2][0]], [result[5][0]]])
 
     def to_basis(self, point: Point) -> Point:
+        if self._is_perspective:
+            pt = np.array([[[point.x, point.y]]], dtype=np.float32)
+            res = cv2.perspectiveTransform(pt, self._H_to_basis)
+            return Point(res[0][0][0], res[0][0][1])
         point_vector = np.array([[point.x], [point.y]], float)
         result = np.matmul(self._transformation_matrix,
                            point_vector) + self._rotation_matrix
         return Point(result[0][0], result[1][0])
 
     def from_basis(self, point: Point) -> Point:
+        if self._is_perspective:
+            pt = np.array([[[point.x, point.y]]], dtype=np.float32)
+            res = cv2.perspectiveTransform(pt, self._H_from_basis)
+            return Point(res[0][0][0], res[0][0][1])
         point_vector = np.array([[point.x], [point.y]], float)
         result = np.matmul(self._transformation_matrix_inv,
                            (point_vector - self._rotation_matrix))

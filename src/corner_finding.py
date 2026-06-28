@@ -2,10 +2,10 @@ import typing
 
 import numpy as np
 
-import geometry_utils
-import image_utils
-import list_utils
-import math_utils
+from . import geometry_utils
+from . import image_utils
+from . import list_utils
+from . import math_utils
 import pathlib
 
 
@@ -58,6 +58,17 @@ class LMark():
                                                *longest_sides_indexes))
         self.unit_length = math_utils.mean(unit_lengths)
 
+    def get_origin(self) -> geometry_utils.Point:
+        v_right_x = (self.polygon[1].x - self.polygon[0].x) / 2
+        v_right_y = (self.polygon[1].y - self.polygon[0].y) / 2
+        v_down_x = (self.polygon[5].x - self.polygon[0].x) / 2
+        v_down_y = (self.polygon[5].y - self.polygon[0].y) / 2
+        return geometry_utils.Point(
+            self.polygon[0].x + v_right_x + v_down_x,
+            self.polygon[0].y + v_right_y + v_down_y)
+
+
+
 
 class SquareMark:
     """An L-shaped polygon.
@@ -103,8 +114,10 @@ class SquareMark:
 
 
 def find_corner_marks(image: np.ndarray,
-                      save_path: typing.Optional[pathlib.PurePath] = None
-                      ) -> geometry_utils.Polygon:
+                      save_path: typing.Optional[pathlib.PurePath] = None,
+                      basis_width: float = 49.5,
+                      basis_height: float = 31.75
+                      ) -> tuple[geometry_utils.Polygon, geometry_utils.ChangeOfBasisTransformer]:
 
     all_polygons: typing.List[
         geometry_utils.Polygon] = image_utils.find_polygons(
@@ -133,20 +146,19 @@ def find_corner_marks(image: np.ndarray,
         except WrongShapeError:
             continue
 
-        # To construct the basis, we use points 0, 4, 5 of the L. The points are in CW order from
-        # the top-left corner, so these are the top-left, bottom-left, and bottom-right-of-bottom-side
-        # points. 
-        basis_transformer = geometry_utils.ChangeOfBasisTransformer(
+        # Establish a preliminary basis transformer to help find the best square marks.
+        # This initial transformer uses the raw L-mark vertices.
+        preliminary_transformer = geometry_utils.ChangeOfBasisTransformer(
             l_mark.polygon[0], l_mark.polygon[5], l_mark.polygon[4])
-        nominal_to_right_side = 50 - 0.5
-        # Since the side of the L is twice as long as it is wide, divide y by two as the new-basis
-        # system will be squashed
-        nominal_to_bottom = ((64 - 0.5) / 2)
+        nominal_to_right_side = basis_width
+        nominal_to_bottom = basis_height
         # We can afford to allow a decently large error margin here since we are just searching for
         # reference points and the rough coordinate system established based on the L is very
         # sensitive to noise.
-        x_tolerance = 0.2 * nominal_to_right_side
-        y_tolerance = 0.2 * nominal_to_bottom
+        x_tolerance = 0.5 * nominal_to_right_side
+        y_tolerance = 0.5 * nominal_to_bottom
+        if save_path is not None:
+            print(f"DEBUG: tolerance x={x_tolerance:.2f}, y={y_tolerance:.2f}")
 
 
         top_right_squares = []
@@ -176,8 +188,8 @@ def find_corner_marks(image: np.ndarray,
                     [0.5, nominal_to_bottom]
                 ]
             ]
-            polys = [basis_transformer.poly_from_basis(nominal_poly_new_basis), hexagon] + [
-                basis_transformer.poly_from_basis(p) for p in corner_tolerance_polys_new_basis
+            polys = [preliminary_transformer.poly_from_basis(nominal_poly_new_basis), hexagon] + [
+                preliminary_transformer.poly_from_basis(p) for p in corner_tolerance_polys_new_basis
             ]
             image_utils.draw_polygons(
                 image,
@@ -192,7 +204,7 @@ def find_corner_marks(image: np.ndarray,
             except WrongShapeError:
                 continue
             centroid = geometry_utils.guess_centroid(square.polygon)
-            centroid_new_basis = basis_transformer.to_basis(centroid)
+            centroid_new_basis = preliminary_transformer.to_basis(centroid)
 
             if math_utils.is_within_tolerance(
                     centroid_new_basis.x, nominal_to_right_side,
@@ -214,16 +226,61 @@ def find_corner_marks(image: np.ndarray,
                 bottom_right_squares) == 0:
             continue
 
-        # TODO: When multiple, either progressively decrease tolerance or
-        # choose closest to centroid
+        # Use the most promising square marks by sorting them by their distance
+        # to the nominal target center in the new basis.
+        def score_square(square):
+            centroid = geometry_utils.guess_centroid(square.polygon)
+            centroid_nb = preliminary_transformer.to_basis(centroid)
+            # target is (nominal_to_right_side, 0.5) for TR, etc.
+            return centroid_nb
 
-        top_left_corner = l_mark.polygon[0]
-        top_right_corner = geometry_utils.get_corner_wrt_basis(
-            top_right_squares[0].polygon, geometry_utils.Corner.TR, basis_transformer)
-        bottom_right_corner = geometry_utils.get_corner_wrt_basis(
-            bottom_right_squares[0].polygon, geometry_utils.Corner.BR, basis_transformer)
-        bottom_left_corner = geometry_utils.get_corner_wrt_basis(
-            bottom_left_squares[0].polygon, geometry_utils.Corner.BL, basis_transformer)
+        # Re-filter and sort squares based on proximity to targets
+        def get_best_square(candidates, target_x, target_y):
+            if not candidates: return None
+            return min(candidates, key=lambda s: (
+                (preliminary_transformer.to_basis(geometry_utils.guess_centroid(s.polygon)).x - target_x)**2 +
+                (preliminary_transformer.to_basis(geometry_utils.guess_centroid(s.polygon)).y - target_y)**2
+            ))
+
+        top_right_square = get_best_square(top_right_squares, nominal_to_right_side, 0.5)
+        bottom_left_square = get_best_square(bottom_left_squares, 0.5, nominal_to_bottom)
+        bottom_right_square = get_best_square(bottom_right_squares, nominal_to_right_side, nominal_to_bottom)
+
+        if not (top_right_square and bottom_left_square and bottom_right_square):
+            continue
+
+        # Calculate the stable top-left grid corner by projecting the top-left L-mark
+        # square center (get_origin) using its known PDF offset from the grid origin.
+        # In PDF coordinates:
+        #   C_BL (bottom-left square center) = (0.5, 0.5)
+        #   C_BR (bottom-right square center) = (8.0, 0.5)
+        #   C_TL (L-mark top-left square center) = (0.65625, 10.34375)
+        # We solve for u and v such that C_grid_TL (0.5, 10.5) is C_BL + u*(C_BR - C_BL) + v*(C_TL - C_BL).
+        # This yields:
+        #   u = -4/189 = -0.021164
+        #   v = 64/63 = 1.015873
+        u = -4.0 / 189.0
+        v = 64.0 / 63.0
+        
+        top_left_centroid = l_mark.get_origin()
+        bottom_left_centroid = geometry_utils.guess_centroid(bottom_left_square.polygon)
+        bottom_right_centroid = geometry_utils.guess_centroid(bottom_right_square.polygon)
+        top_right_grid_pixel = geometry_utils.guess_centroid(top_right_square.polygon)
+        
+        top_left_grid_pixel = geometry_utils.Point(
+            bottom_left_centroid.x + u * (bottom_right_centroid.x - bottom_left_centroid.x) + v * (top_left_centroid.x - bottom_left_centroid.x),
+            bottom_left_centroid.y + u * (bottom_right_centroid.y - bottom_left_centroid.y) + v * (top_left_centroid.y - bottom_left_centroid.y)
+        )
+        bottom_left_grid_pixel = bottom_left_centroid
+        bottom_right_grid_pixel = bottom_right_centroid
+        
+        basis_transformer = geometry_utils.ChangeOfBasisTransformer(
+            top_left_grid_pixel, bottom_left_grid_pixel, bottom_right_grid_pixel, top_right_grid_pixel)
+
+        top_left_corner = top_left_grid_pixel
+        top_right_corner = top_right_grid_pixel
+        bottom_right_corner = bottom_right_grid_pixel
+        bottom_left_corner = bottom_left_grid_pixel
 
         grid_corners = [
             top_left_corner,     top_right_corner,
@@ -233,5 +290,5 @@ def find_corner_marks(image: np.ndarray,
         if save_path:
             image_utils.draw_polygons(image, [grid_corners], save_path / "grid_limits.jpg")
 
-        return grid_corners
+        return grid_corners, basis_transformer
     raise CornerFindingError("Couldn't find document corners.")

@@ -2,16 +2,16 @@ import argparse
 import sys
 from datetime import datetime
 
-import file_handling
-from file_handling import parse_path_arg
-import grid_info as grid_i
-from process_input import process_input
-
+from . import file_handling
+from .file_handling import parse_path_arg
+from . import grid_info as grid_i
+from .process_input import process_input
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='OpenMCR: An accurate and simple exam bubble sheet reading tool.\n'
-                                                 'Reads sheets from input folder, process and saves result in output folder.',
-                                     formatter_class=argparse.RawTextHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description='OpenMCR: An accurate and simple exam bubble sheet reading tool.\n'
+                    'Reads sheets from input folder, process and saves result in output folder.',
+        formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument('input_folder',
                         help='Path to a folder containing scanned input sheets.\n'
                              'Sheets with student ID of "9999999999" treated as keys. Ignores subfolders.',
@@ -27,8 +27,8 @@ if __name__ == '__main__':
                         type=parse_path_arg)
     parser.add_argument('--variant',
                         default='75',
-                        choices=['75', '150'],
-                        help='Form variant either 75 questions (default) or 150 questions.')
+                        choices=['75', '150', '225'],
+                        help='Form variant: 75 questions (default), 150 questions, or 225 questions (2-sided).')
     parser.add_argument('-ml', '--multiple',
                         action='store_true',
                         help='Convert multiple answers in a question to F, instead of [A|B].')
@@ -64,18 +64,22 @@ if __name__ == '__main__':
     sort_results = args.sort
     output_mcta = args.mcta
     debug_mode_on = args.debug
-    form_variant = grid_i.form_150q if args.variant == '150' else grid_i.form_75q
+    form_variant = {
+        '75': grid_i.form_75q,
+        '150': grid_i.form_150q,
+        '225': grid_i.form_two_sided_225q,
+    }[args.variant]
     files_timestamp = datetime.now().replace(microsecond=0) if not args.disable_timestamps else None
-    print(arrangement_file)
-    process_input(image_paths,
-                  output_folder,
-                  multi_answers_as_f,
-                  empty_answers_as_g,
-                  keys_file,
-                  arrangement_file,
-                  sort_results,
-                  output_mcta,
-                  debug_mode_on,
-                  form_variant,
-                  None,
-                  files_timestamp)
+    process_input(
+        image_paths,
+        output_folder,
+        multi_answers_as_f,
+        empty_answers_as_g,
+        keys_file,
+        arrangement_file,
+        sort_results,
+        output_mcta,
+        debug_mode_on,
+        form_variant,
+        None,
+        files_timestamp)

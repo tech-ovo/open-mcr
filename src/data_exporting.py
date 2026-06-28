@@ -6,8 +6,8 @@ import pathlib
 import typing as tp
 from datetime import datetime
 
-import list_utils
-from grid_info import Field, RealOrVirtualField, VirtualField
+from . import list_utils
+from .grid_info import Field, RealOrVirtualField, VirtualField
 
 # If you change these, also update the manual!
 COLUMN_NAMES: tp.Dict[RealOrVirtualField, str] = {
@@ -153,10 +153,13 @@ class OutputSheet():
         cells with `replace_empty_with`. Pads any short rows with that value to
         make all rows the same length. """
         # Finds the length of the longest row by subtracting the minimum number of trailing empty elements
-        longest_length = len(self.data[0]) - min([
-            list_utils.count_trailing_empty_elements(row)
-            for row in self.data[1:]
-        ])
+        if len(self.data) > 1:
+            longest_length = len(self.data[0]) - min([
+                list_utils.count_trailing_empty_elements(row)
+                for row in self.data[1:]
+            ])
+        else:
+            longest_length = len(self.data[0])
         self.data[0] = self.data[0][:longest_length]
         for i, row in enumerate(self.data):
             cleaned_row = row[:self.first_question_column_index] + [
@@ -176,11 +179,9 @@ class OutputSheet():
         Raises TypeError if invalid arrangement file.
 
         Results will have empty form code index."""
-        # TODO: Validate arrangement file.
         # order_map will be a dict matching form code keys to a list where the
         # new index of question `i` in `key` is `order_map[key][i]`
         order_map: tp.Dict[str, tp.List[int]] = {}
-        validate_order_map(order_map, self.num_questions)
 
         with open(str(arrangement_file), 'r', newline='') as file:
             reader = csv.reader(file)
@@ -195,6 +196,11 @@ class OutputSheet():
                     int(n) - 1 for n in stripped_form[first_answer_index:]
                 ]
                 order_map[form_code] = to_order_zero_ind
+        
+        if not order_map:
+            raise ValueError(f"Arrangement file '{arrangement_file}' is empty.")
+
+        validate_order_map(order_map, self.num_questions)
 
         sheet_form_code_index = list_utils.find_index(
             self.data[0], COLUMN_NAMES[Field.TEST_FORM_CODE])

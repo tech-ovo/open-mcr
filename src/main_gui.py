@@ -1,8 +1,10 @@
-import file_handling
-import grid_info as grid_i
-import user_interface
+from . import file_handling
+from . import corner_finding
+from . import grid_info as grid_i
+from . import user_interface
 import sys
-from process_input import process_input
+from . import process_input
+from . import data_exporting
 from datetime import datetime
 
 user_input = user_interface.MainWindow()
@@ -20,7 +22,12 @@ arrangement_file = user_input.arrangement_map
 sort_results = user_input.sort_results
 output_mcta = user_input.output_mcta
 debug_mode_on = user_input.debug_mode
-form_variant = grid_i.form_150q if user_input.form_variant == user_interface.FormVariantSelection.VARIANT_150_Q else grid_i.form_75q
+form_variant = {
+    user_interface.FormVariantSelection.VARIANT_75_Q: grid_i.form_75q,
+    user_interface.FormVariantSelection.VARIANT_150_Q: grid_i.form_150q,
+    user_interface.FormVariantSelection.VARIANT_225_Q_TWOSIDED:
+        grid_i.form_two_sided_225q,
+}[user_input.form_variant]
 progress_tracker = user_input.create_and_pack_progress(maximum=len(image_paths))
 files_timestamp = datetime.now().replace(microsecond=0)
 

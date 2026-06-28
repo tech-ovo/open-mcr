@@ -15,11 +15,39 @@ https://github.com/iansan5653/open-mcr
 ### Printing Sheets
 
 In order to use the OpenMCR software, students must use the provided multiple-
-choice sheets. Two options are available (click the names to print PDFs):
+choice sheets. Three options are available (click the names to print PDFs):
 
 - `multiple_choice_sheet_75q` (https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_75q.pdf): Has 75 questions as well as space for students' full names, course ID, student ID, and test form code.
 - `multiple_choice_sheet_150q` (https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_150q.pdf):
   Doubles the number of questions to 150, but removes the bubbles for student name. Instead, a non-processed write-in name field is provided.
+- `multiple_choice_sheet_225q_twosided` (https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_225q_twosided.pdf):
+  A double-sided sheet that combines three 75-question tests (225 questions
+  total) onto a single sheet, so you can grade three exams at once.
+
+  **Page 1** has three columns:
+  - Student ID (10 digits) + a write-in Name blank
+  - Test 1 ID (4 digits) + 38 MCQs (Q1-Q38, the "left half" of Test 1)
+  - 37 MCQs (Q39-Q75, the "right half" of Test 1)
+
+  **Page 2** has four columns:
+  - Test 2 ID (4 digits) + 38 MCQs (Q1-Q38, the "left half" of Test 2)
+  - 37 MCQs (Q39-Q75, the "right half" of Test 2)
+  - Test 3 ID (4 digits) + 38 MCQs (Q1-Q38, the "left half" of Test 3)
+  - 37 MCQs (Q39-Q75, the "right half" of Test 3)
+
+  Each MCQ "test" is split into two side-by-side halves on the page; the
+  scanner reads them as a single 75-question column (Q1..Q75). Each MCQ
+  column carries its own Test ID, and the Student ID from the front page
+  is propagated to the back page so all three rows in the output share
+  the same Student ID.
+
+  **Scanning**: the sheet must be scanned as a 2-page document (PDF or
+  multi-page TIFF) so the scanner sees both sides. Each scanned student
+  produces three output rows (one per test) in the results CSV. To
+  create an answer key, fill in Student ID `9999999999`, set each Test
+  ID, and bubble in the correct answers for all three tests - the
+  software will produce three key rows that are matched to students
+  by Test ID.
 
 The program is robust and should work with most printers and scanners, however
 best results will be obtained by using a laser printer in black & white mode

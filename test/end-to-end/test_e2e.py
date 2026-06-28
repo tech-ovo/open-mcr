@@ -18,7 +18,7 @@ def test_e2e(path: Path):
 
     subprocess.check_call([
       sys.executable or 'python',
-      str(open_mcr_path),
+      '-m', 'src.main',
       input_path,
       str(actual_output_path),
       "--disable-timestamp",

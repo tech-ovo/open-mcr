@@ -3,8 +3,8 @@
 import pathlib
 import typing as tp
 
-from image_utils import SUPPORTED_IMAGE_EXTENSIONS
-from str_utils import strip_double_quotes
+from .image_utils import SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_MULTIPAGE_EXTENSIONS
+from .str_utils import strip_double_quotes
 
 
 def list_file_paths(directory: pathlib.Path) -> tp.List[pathlib.Path]:
@@ -38,8 +38,11 @@ def filter_by_extensions(files: tp.Sequence[pathlib.Path],
 
 
 def filter_images(files: tp.Sequence[pathlib.Path]) -> tp.List[pathlib.Path]:
-    """Filter a list of Paths and return only the images."""
-    return filter_by_extensions(files, SUPPORTED_IMAGE_EXTENSIONS)
+    """Filter a list of Paths and return only the images (including
+    multi-page PDFs and TIFFs)."""
+    return filter_by_extensions(files,
+                                SUPPORTED_IMAGE_EXTENSIONS +
+                                SUPPORTED_MULTIPAGE_EXTENSIONS)
 
 
 

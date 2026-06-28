@@ -3,7 +3,7 @@
 import enum
 import typing as tp
 
-import list_utils
+from . import list_utils
 
 
 class InequalityTypes(enum.Enum):

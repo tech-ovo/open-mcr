@@ -7,9 +7,95 @@ import cv2
 import numpy as np
 from numpy import ma
 
-import geometry_utils
+from . import geometry_utils
 
 SUPPORTED_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"]
+SUPPORTED_MULTIPAGE_EXTENSIONS = [".pdf", ".tif", ".tiff"]
+
+
+class UnsupportedImageError(ValueError):
+    """Raised when an input file is not a supported image type."""
+
+
+def _try_load_pdf_pages(path: pathlib.PurePath) -> tp.Optional[tp.List[np.ndarray]]:
+    """Try to load all pages of a PDF as a list of images. Returns None if no
+    PDF backend is available or the file isn't a valid PDF."""
+    # Try pypdfium2 first (no native dependencies)
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+    except ImportError:
+        pdfium = None  # type: ignore
+    if pdfium is not None:
+        try:
+            doc = pdfium.PdfDocument(str(path))
+            pages = []
+            for i in range(len(doc)):
+                page = doc[i]
+                pil_image = page.render(scale=2).to_pil()
+                pages.append(cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR))
+            return pages
+        except Exception:
+            return None
+
+    # Fall back to pdf2image (requires poppler)
+    try:
+        from pdf2image import convert_from_path  # type: ignore
+    except ImportError:
+        return None
+    try:
+        pil_images = convert_from_path(str(path), dpi=200)
+        return [cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR) for img in pil_images]
+    except Exception:
+        return None
+
+
+def _try_load_multipage_tiff(path: pathlib.PurePath) -> tp.Optional[tp.List[np.ndarray]]:
+    """Try to load every page of a multi-page TIFF as a list of images."""
+    try:
+        # OpenCV can read all pages via imreadmulti
+        ok, frames = cv2.imreadmulti(str(path))
+    except cv2.error:
+        return None
+    if not ok or frames is None:
+        return None
+    if isinstance(frames, np.ndarray) and frames.ndim == 3:
+        return [frames]
+    return [f for f in frames]
+
+
+def load_image_pages(path: pathlib.PurePath) -> tp.List[np.ndarray]:
+    """Load an image file as one or more pages.
+
+    For single-page images (PNG/JPG/etc.) this returns a one-element list.
+    For multi-page TIFFs and PDFs it returns one image per page.
+
+    Raises UnsupportedImageError if the file extension is not supported or the
+    file cannot be read."""
+    suffix = "".join(path.suffixes).lower()
+    if suffix not in SUPPORTED_IMAGE_EXTENSIONS and suffix not in SUPPORTED_MULTIPAGE_EXTENSIONS:
+        raise UnsupportedImageError(f"Unsupported file type: {suffix}")
+
+    if suffix == ".pdf":
+        pages = _try_load_pdf_pages(path)
+        if pages is None or len(pages) == 0:
+            raise UnsupportedImageError(
+                "PDF support requires pypdfium2 or pdf2image (with poppler) installed.")
+        return pages
+
+    if suffix in (".tif", ".tiff"):
+        pages = _try_load_multipage_tiff(path)
+        if pages is None or len(pages) == 0:
+            # Fall back to single-image read
+            img = cv2.imread(str(path))
+            if img is None:
+                raise UnsupportedImageError(f"Could not read image: {path}")
+            return [img]
+        return pages
+
+    img = cv2.imread(str(path))
+    if img is None:
+        raise UnsupportedImageError(f"Could not read image: {path}")
+    return [img]
 
 
 def convert_to_grayscale(image: np.ndarray,
@@ -75,10 +161,14 @@ def get_image(path: pathlib.PurePath,
               save_path: tp.Optional[pathlib.PurePath] = None) -> np.ndarray:
     """Returns the cv2 image located at the given path.
 
+    For backwards compatibility this returns the first page of a multi-page
+    image. Prefer `load_image_pages` for new code.
+
     If `save_path` is provided, will save the resulting image to this location
     as "original.jpg". Used for debugging purposes.
     """
-    result = cv2.imread(str(path))
+    pages = load_image_pages(path)
+    result = pages[0]
     if save_path:
         save_image(save_path / "original.jpg", result)
     return result

@@ -1,0 +1,23 @@
+[
+  {
+    "id": "bfa02437",
+    "title": "Fix basis transformer to use an orthogonal transformation instead of raw affine matrix",
+    "status": "in_progress",
+    "createdAt": "2026-06-26T16:23:01.258Z",
+    "updatedAt": "2026-06-26T16:23:01.258Z"
+  },
+  {
+    "id": "5b4f7fa6",
+    "title": "Adjust Grid initialization to use the provided basis transformer from corner_finding",
+    "status": "pending",
+    "createdAt": "2026-06-26T16:23:01.258Z",
+    "updatedAt": "2026-06-26T16:23:01.258Z"
+  },
+  {
+    "id": "b4f3643e",
+    "title": "Verify if the grid alignment is restored (no more drift)",
+    "status": "pending",
+    "createdAt": "2026-06-26T16:23:01.258Z",
+    "updatedAt": "2026-06-26T16:23:01.258Z"
+  }
+]

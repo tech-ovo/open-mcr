@@ -8,9 +8,9 @@ from tkinter import filedialog, ttk
 import typing as tp
 import platform
 
-import file_handling
-import scoring
-import str_utils
+from . import file_handling
+from . import scoring
+from . import str_utils
 
 YPADDING = 4
 XPADDING = 7
@@ -221,6 +221,7 @@ class SelectWidget():
 class FormVariantSelection(enum.Enum):
     VARIANT_75_Q = enum.auto()
     VARIANT_150_Q = enum.auto()
+    VARIANT_225_Q_TWOSIDED = enum.auto()
 
 
 class InputFolderPickerWidget():
@@ -251,7 +252,8 @@ class InputFolderPickerWidget():
             container, "Save empty answers in questions as 'G'.",
             self.__on_update, True)
         self.__form_variant_picker = SelectWidget(
-            container, "Form Variant:", ["75 questions", "150 questions"],
+            container, "Form Variant:",
+            ["75 questions", "150 questions", "225 questions (2-sided)"],
             self.__on_update)
 
         pack(container, fill=tk.X)
@@ -270,6 +272,8 @@ class InputFolderPickerWidget():
             self.form_variant = FormVariantSelection.VARIANT_75_Q
         elif (selected_form_variant == "150 questions"):
             self.form_variant = FormVariantSelection.VARIANT_150_Q
+        elif (selected_form_variant == "225 questions (2-sided)"):
+            self.form_variant = FormVariantSelection.VARIANT_225_Q_TWOSIDED
 
         if self.__on_change is not None:
             self.__on_change()
@@ -535,6 +539,11 @@ class MainWindow:
             new_status += "Using 75-question form variant.\n"
         elif self.form_variant == FormVariantSelection.VARIANT_150_Q:
             new_status += "Using 150-question form variant.\n"
+        elif self.form_variant == FormVariantSelection.VARIANT_225_Q_TWOSIDED:
+            new_status += (
+                "Using 225-question (two-sided) form variant. Scan each"
+                "\nstudent's sheet as a 2-page PDF (or one image per side);"
+                "\nresults will be output as three rows per student.\n")
 
         output_folder = self.__output_folder_picker.folder
         if output_folder is None:
@@ -628,6 +637,14 @@ class MainWindow:
             helpfile = str(
                 Path(__file__).parent / "assets" /
                 "multiple_choice_sheet_150q.pdf")
+            if platform.system() in ('Darwin','Linux'):
+                subprocess.Popen(['open', helpfile])
+            else:
+                subprocess.Popen([helpfile], shell=True)
+        elif (self.form_variant == FormVariantSelection.VARIANT_225_Q_TWOSIDED):
+            helpfile = str(
+                Path(__file__).parent / "assets" /
+                "multiple_choice_sheet_225q_twosided.pdf")
             if platform.system() in ('Darwin','Linux'):
                 subprocess.Popen(['open', helpfile])
             else:

@@ -2,10 +2,10 @@ import csv
 import pathlib
 import typing as tp
 
-import data_exporting
-import grid_info
-import list_utils
-import math_utils
+from . import data_exporting
+from . import grid_info
+from . import list_utils
+from . import math_utils
 
 
 def get_key_form_code(answer_keys: data_exporting.OutputSheet,

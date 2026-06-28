@@ -10,11 +10,11 @@ import cv2
 import numpy as np
 from numpy import ma
 
-import alphabet
-import geometry_utils
-import grid_info
-import image_utils
-import list_utils
+from . import alphabet
+from . import geometry_utils
+from . import grid_info
+from . import image_utils
+from . import list_utils
 
 """ This is what determines the circle size of the grid cell mask. If it is 0,
 the circle touches all edges of the grid cell. If it is 0.5, the circle is 50%
@@ -47,7 +47,9 @@ class Grid:
                  horizontal_cells: int,
                  vertical_cells: int,
                  image: np.ndarray,
-                 save_path: tp.Optional[pathlib.PurePath] = None):
+                 basis_transformer: tp.Optional[geometry_utils.ChangeOfBasisTransformer] = None,
+                 save_path: tp.Optional[pathlib.PurePath] = None,
+                 y_shift: float = 0.0):
         """Initiate a new Grid. Corners should be clockwise starting from the
         top left - if not, the grid will have unexpected behavior.
 
@@ -56,8 +58,13 @@ class Grid:
         self.corners = corners
         self.horizontal_cells = horizontal_cells
         self.vertical_cells = vertical_cells
-        self.basis_transformer = geometry_utils.ChangeOfBasisTransformer(
-            corners[0], corners[3], corners[2])
+        self.y_shift = y_shift
+        
+        if basis_transformer is not None:
+            self.basis_transformer = basis_transformer
+        else:
+            self.basis_transformer = geometry_utils.ChangeOfBasisTransformer(
+                corners[0], corners[3], corners[2])
 
         self.horizontal_cell_size = 1 / self.horizontal_cells
         self.vertical_cell_size = 1 / self.vertical_cells
@@ -71,13 +78,13 @@ class Grid:
                                  down: int) -> geometry_utils.Polygon:
         return [
             geometry_utils.Point(across * self.horizontal_cell_size,
-                                 down * self.vertical_cell_size),
+                                 down * self.vertical_cell_size + self.y_shift),
             geometry_utils.Point((across + 1) * self.horizontal_cell_size,
-                                 down * self.vertical_cell_size),
+                                 down * self.vertical_cell_size + self.y_shift),
             geometry_utils.Point((across + 1) * self.horizontal_cell_size,
-                                 (down + 1) * self.vertical_cell_size),
+                                 (down + 1) * self.vertical_cell_size + self.y_shift),
             geometry_utils.Point(across * self.horizontal_cell_size,
-                                 (down + 1) * self.vertical_cell_size),
+                                 (down + 1) * self.vertical_cell_size + self.y_shift),
         ]
 
 
@@ -126,14 +133,19 @@ class Grid:
 
     def get_masked_cell_matrix(self, across: int, down: int) -> ma.MaskedArray:
         """Get the matrix of pixels in the cell area, masked down to just the cell circle."""
+        # Extract the raw pixel values for the cell
         unmasked = self.get_unmasked_cell_matrix(across, down)
-        mask = np.ones(unmasked.shape)
-        unit_dimension = sum(mask.shape) / 2
-        center = (round(mask.shape[0] / 2), round(mask.shape[1] / 2))
-        circle_radius = (unit_dimension / 2) * (1 -
-                                                (GRID_CELL_CROP_FRACTION / 2))
-        cv2.circle(mask, center, int(circle_radius), (0, 0, 0), -1)
-        masked = ma.masked_array(unmasked, mask)
+        # Determine cell bounds in image coordinates
+        ((min_x, max_x), (min_y, max_y)) = self.get_cell_range(across, down)
+        # Compute average dimension and radius for the circular mask
+        avg_dim = ((max_x - min_x) + (max_y - min_y)) / 2
+        radius = int((avg_dim * (1 - GRID_CELL_CROP_FRACTION)) / 2)
+        # Build a boolean mask where points outside the circle are masked (True)
+        height, width = unmasked.shape
+        cy, cx = height // 2, width // 2
+        yy, xx = np.ogrid[:height, :width]
+        mask_bool = (xx - cx) ** 2 + (yy - cy) ** 2 > radius ** 2
+        masked = ma.masked_array(unmasked, mask_bool)
         return masked
 
     def draw_grid(self):
@@ -206,10 +218,28 @@ class _GridField(abc.ABC):
 
 
 class NumberGridField(_GridField):
-    """A number grid field is one set of grid cells that represents a digit."""
+    """A number grid field is one set of grid cells that represents a digit.
+    
+    For numeric fields exactly one bubble per field should be filled.
+    We use argmax (highest fill percent) rather than threshold comparison.
+    The global threshold is calibrated to MCQ answer bubbles which are
+    typically much darker than number-field bubbles; using it here causes
+    blank results. Instead we use a low fixed noise-floor cutoff (0.05) —
+    any column whose max fill exceeds 5% is considered to have a bubble filled.
+    """
+    # Minimum fill percent to consider a bubble filled (noise floor)
+    _MIN_FILL = 0.05
+
     def read_value(self, threshold: float,
                    fill_percents: tp.List[float]) -> tp.List[int]:
-        return super()._read_value_indexes(threshold, fill_percents)
+        if not fill_percents:
+            return []
+        max_fill = max(fill_percents)
+        # Use a low fixed floor rather than the global (MCQ-calibrated) threshold
+        if max_fill <= self._MIN_FILL:
+            return []
+        best_idx = fill_percents.index(max_fill)
+        return [best_idx]
 
 
 class LetterGridField(_GridField):
@@ -252,14 +282,18 @@ class NumberGridFieldGroup(_GridFieldGroup):
     entire number."""
     def __init__(self, grid: Grid, horizontal_start: int, vertical_start: int,
                  num_fields: int, field_length: int,
-                 field_orientation: geometry_utils.Orientation):
+                 field_orientation: geometry_utils.Orientation,
+                 cell_orientation: tp.Optional[geometry_utils.Orientation] = None):
         fields_vertical = field_orientation is geometry_utils.Orientation.VERTICAL
+        # cell_orientation controls how bubbles within each field are read;
+        # defaults to field_orientation for backward compatibility.
+        _cell_orient = cell_orientation if cell_orientation is not None else field_orientation
         self.fields = [
             NumberGridField(
                 grid,
-                horizontal_start + i if fields_vertical else horizontal_start,
-                vertical_start + i if not fields_vertical else vertical_start,
-                field_orientation, field_length) for i in range(num_fields)
+                horizontal_start + i if not fields_vertical else horizontal_start,
+                vertical_start + i if fields_vertical else vertical_start,
+                _cell_orient, field_length) for i in range(num_fields)
         ]
 
     def read_value(self, threshold: float,
@@ -274,14 +308,16 @@ class LetterGridFieldGroup(_GridFieldGroup):
     entire string."""
     def __init__(self, grid: Grid, horizontal_start: int, vertical_start: int,
                  num_fields: int, field_length: int,
-                 field_orientation: geometry_utils.Orientation):
+                 field_orientation: geometry_utils.Orientation,
+                 cell_orientation: tp.Optional[geometry_utils.Orientation] = None):
         fields_vertical = field_orientation is geometry_utils.Orientation.VERTICAL
+        _cell_orient = cell_orientation if cell_orientation is not None else field_orientation
         self.fields = [
             LetterGridField(
                 grid,
-                horizontal_start + i if fields_vertical else horizontal_start,
-                vertical_start + i if not fields_vertical else vertical_start,
-                field_orientation, field_length) for i in range(num_fields)
+                horizontal_start + i if not fields_vertical else horizontal_start,
+                vertical_start + i if fields_vertical else vertical_start,
+                _cell_orient, field_length) for i in range(num_fields)
         ]
 
     def read_value(self, threshold: float,
@@ -296,24 +332,83 @@ def get_group_from_info(info: grid_info.GridGroupInfo,
     if info.fields_type is grid_info.FieldType.LETTER:
         return LetterGridFieldGroup(grid, info.horizontal_start,
                                     info.vertical_start, info.num_fields,
-                                    info.field_length, info.field_orientation)
+                                    info.field_length, info.field_orientation,
+                                    info.cell_orientation)
     else:
         return NumberGridFieldGroup(grid, info.horizontal_start,
                                     info.vertical_start, info.num_fields,
-                                    info.field_length, info.field_orientation)
+                                    info.field_length, info.field_orientation,
+                                    info.cell_orientation)
 
 
 def read_field(field: grid_info.Field, grid: Grid, threshold: float,
                form_variant: grid_info.FormVariant,
                fill_percents: tp.List[tp.List[float]]
                ) -> tp.Optional[tp.List[tp.Union[tp.List[str], tp.List[int]]]]:
-    """Shortcut to read a field given just the key for it and the grid object."""
+    """Shortcut to read a single-valued field. If the field has multiple
+    instances on the sheet, only the first is returned."""
     grid_group_info = form_variant.fields[field]
-    if grid_group_info is not None:
-        return get_group_from_info(grid_group_info,
-                                   grid).read_value(threshold, fill_percents)
-    else:
+    if grid_group_info is None:
         return None
+    if isinstance(grid_group_info, list):
+        if not grid_group_info:
+            return None
+        grid_group_info = grid_group_info[0]
+    grid_group = get_group_from_info(grid_group_info, grid)
+    # Handle multi‑column fields where fill_percents is a list of lists.
+    if isinstance(fill_percents[0], list):
+        combined: tp.List[tp.Union[tp.List[str], tp.List[int]]] = []
+        for sub_fill in fill_percents:
+            val = grid_group.read_value(threshold, sub_fill)
+            if isinstance(val, list):
+                combined.extend(val)
+            else:
+                combined.append(val)
+        return combined
+    # Single‑column field.
+    return grid_group.read_value(threshold, fill_percents)
+
+
+def read_field_instance(
+        field: grid_info.Field, instance: int, grid: Grid, threshold: float,
+        form_variant: grid_info.FormVariant,
+        fill_percents: tp.List[tp.List[float]]
+) -> tp.Optional[tp.List[tp.Union[tp.List[str], tp.List[int]]]]:
+    """Read a specific instance of a field, for fields that have multiple
+    GridGroupInfo entries on the sheet (used by the two-sided variant)."""
+    grid_group_info = form_variant.fields[field]
+    if grid_group_info is None:
+        return None
+    if isinstance(grid_group_info, list):
+        if instance >= len(grid_group_info):
+            return None
+        grid_group_info = grid_group_info[instance]
+    if instance > 0:
+        # Single-valued field requested with a non-zero instance - nothing
+        # to read.
+        return None
+    return get_group_from_info(grid_group_info,
+                               grid).read_value(threshold, fill_percents)
+
+
+def read_all_field_instances(
+        field: grid_info.Field, grid: Grid, threshold: float,
+        form_variant: grid_info.FormVariant,
+        fill_percents: tp.List[tp.List[float]]
+) -> tp.List[tp.List[tp.Union[tp.List[str], tp.List[int]]]]:
+    """Read all instances of a field. Returns a list (possibly empty) of the
+    read values, one per instance."""
+    grid_group_info = form_variant.fields[field]
+    if grid_group_info is None:
+        return []
+    if isinstance(grid_group_info, list):
+        infos = grid_group_info
+    else:
+        infos = [grid_group_info]
+    return [
+        get_group_from_info(info, grid).read_value(threshold, fill_percents)
+        for info in infos
+    ]
 
 
 def read_answer(question: int, grid: Grid, threshold: float,
@@ -323,6 +418,66 @@ def read_answer(question: int, grid: Grid, threshold: float,
     """Shortcut to read a field given just the key for it and the grid object."""
     return get_group_from_info(form_variant.questions[question],
                                grid).read_value(threshold, fill_percents)
+
+
+def read_answer_column(
+        column_index: int, question_index: int, grid: Grid, threshold: float,
+        form_variant: grid_info.FormVariant,
+        fill_percents: tp.List[tp.List[float]]
+) -> tp.List[tp.Union[tp.List[str], tp.List[int]]]:
+    """Read a question from a specific MCQ column. Used by multi-column
+    variants (two-sided form page 2 has 2 MCQ columns).
+
+    `fill_percents` should be the per-column fill percent list returned by
+    `get_answer_fill_percents_for_column`, i.e. `fill_percents[question_index]`
+    is the list of bubble fill percents for that question.
+    """
+    column = form_variant.question_columns[column_index]
+    return get_group_from_info(column[question_index],
+                               grid).read_value(threshold,
+                                                fill_percents[question_index])
+
+
+def get_answer_fill_percents_for_column(
+        column_index: int, grid: Grid,
+        form_variant: grid_info.FormVariant
+) -> tp.List[tp.List[float]]:
+    """Return the fill-percent list for every question in a specific MCQ
+    column."""
+    column = form_variant.question_columns[column_index]
+    return [get_group_from_info(q, grid).get_all_fill_percents() for q in column]
+
+
+def get_field_fill_percents(
+        field: grid_info.Field, grid: Grid,
+        form_variant: grid_info.FormVariant
+) -> tp.List[tp.List[tp.List[float]]]:
+    """Return the fill-percent matrix for every instance of a field."""
+    grid_group_info = form_variant.fields[field]
+    if grid_group_info is None:
+        return []
+    if isinstance(grid_group_info, list):
+        infos = grid_group_info
+    else:
+        infos = [grid_group_info]
+    return [get_group_from_info(info, grid).get_all_fill_percents() for info in infos]
+
+
+def get_first_field_fill_percents(
+        field: grid_info.Field, grid: Grid,
+        form_variant: grid_info.FormVariant
+) -> tp.Optional[tp.List[tp.List[float]]]:
+    """Convenience wrapper for fields with a single instance (or when only
+    the first instance is needed)."""
+    grid_group_info = form_variant.fields[field]
+    if grid_group_info is None:
+        return None
+    if isinstance(grid_group_info, list):
+        if not grid_group_info:
+            return None
+        grid_group_info = grid_group_info[0]
+    return get_group_from_info(grid_group_info,
+                               grid).get_all_fill_percents()
 
 
 def field_group_to_string(
