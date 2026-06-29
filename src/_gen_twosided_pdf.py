@@ -140,9 +140,18 @@ MCQ_FIRST_ROW = 19
 def draw_page1(c):
     page_corner_marks(c)
 
+    # Header
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(4.25 * inch, 10.4 * inch, "CAJCL State Convention 2027")
+
     # Col 1: Student ID (5 digits)
     field_digits(c, col_start=2, row_start=SID_ROW, n_fields=5, label="Student ID")
-    text_at(c, 2 * CELL_WIDTH + MARGIN_IN, (SID_ROW + 13) * CELL_HEIGHT, "Name: ___________________________", size=10, bold=True)
+    
+    x_pos = 2 * CELL_WIDTH + MARGIN_IN
+    text_at(c, x_pos, 6.5, "First Name: _________________________", size=10, bold=True)
+    text_at(c, x_pos, 5.5, "Last Name: _________________________", size=10, bold=True)
+    text_at(c, x_pos, 4.5, "School: _________________________", size=10, bold=True)
+    text_at(c, x_pos, 3.5, "Latin Level: _________________________", size=10, bold=True)
 
     # Test 1
     mcq_col_1_start = 13 
@@ -157,6 +166,10 @@ def draw_page1(c):
 
 def draw_page2(c):
     page_corner_marks(c)
+
+    # Header
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(4.25 * inch, 10.4 * inch, "CAJCL State Convention 2027")
 
     # Test 2: Shifted LEFT
     t2_sub1_start = 0 
