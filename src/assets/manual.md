@@ -20,7 +20,7 @@ choice sheets. Three options are available (click the names to print PDFs):
 - `multiple_choice_sheet_75q` (https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_75q.pdf): Has 75 questions as well as space for students' full names, course ID, student ID, and test form code.
 - `multiple_choice_sheet_150q` (https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_150q.pdf):
   Doubles the number of questions to 150, but removes the bubbles for student name. Instead, a non-processed write-in name field is provided.
-- `multiple_choice_sheet_225q_twosided` (https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_225q_twosided.pdf):
+- `multiple_choice_sheet_240q_twosided` (https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_240q_twosided.pdf):
   A double-sided sheet that combines three 75-question tests (225 questions
   total) onto a single sheet, so you can grade three exams at once.
 

@@ -81,7 +81,7 @@ for printing here:
 
 * [75 Question Variant](https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_75q.pdf)
 * [150 Question Variant](https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_150q.pdf)
-* [225 Question Variant (Two-Sided, 3x75 MCQ columns)](https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_225q_twosided.pdf)
+* [225 Question Variant (Two-Sided, 3x75 MCQ columns)](https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_240q_twosided.pdf)
 
 ## Usage Instructions
 

@@ -644,7 +644,7 @@ class MainWindow:
         elif (self.form_variant == FormVariantSelection.VARIANT_225_Q_TWOSIDED):
             helpfile = str(
                 Path(__file__).parent / "assets" /
-                "multiple_choice_sheet_225q_twosided.pdf")
+                "multiple_choice_sheet_240q_twosided.pdf")
             if platform.system() in ('Darwin','Linux'):
                 subprocess.Popen(['open', helpfile])
             else:
