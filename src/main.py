@@ -27,8 +27,8 @@ if __name__ == '__main__':
                         type=parse_path_arg)
     parser.add_argument('--variant',
                         default='75',
-                        choices=['75', '150', '225'],
-                        help='Form variant: 75 questions (default), 150 questions, or 225 questions (2-sided).')
+                        choices=['75', '150', '225', '240'],
+                        help='Form variant: 75 questions (default), 150 questions, 225 questions (2-sided), or 240 questions (2-sided).')
     parser.add_argument('-ml', '--multiple',
                         action='store_true',
                         help='Convert multiple answers in a question to F, instead of [A|B].')
@@ -68,6 +68,7 @@ if __name__ == '__main__':
         '75': grid_i.form_75q,
         '150': grid_i.form_150q,
         '225': grid_i.form_two_sided_225q,
+        '240': grid_i.form_two_sided_240q,
     }[args.variant]
     files_timestamp = datetime.now().replace(microsecond=0) if not args.disable_timestamps else None
     process_input(

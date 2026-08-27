@@ -270,7 +270,7 @@ class TwoSidedFormVariant():
         self.page_variants = page_variants
 
     def variant_for_page(self, page_index: int) -> FormVariant:
-        return self.page_variants[page_index]
+        return self.page_variants[page_index % len(self.page_variants)]
 
 
 # The two-sided 240q form combines two page variants.

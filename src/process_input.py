@@ -292,8 +292,7 @@ def process_input(
 
             any_page_failed = False
             # For the two-sided variant, carry shared fields (Student ID, etc.)
-            # forward from page 1 to page 2 so that all rows produced from
-            # this scan share the same Student ID.
+            # forward from front page to back page for each student sheet.
             carry_over: tp.Dict[grid_i.Field, str] = {}
             for page_index, image in enumerate(pages):
                 page_label = (image_path.name
@@ -307,14 +306,19 @@ def process_input(
                 # For a TwoSidedFormVariant, dispatch to the per-page variant.
                 # For a plain FormVariant, use it for every page.
                 if isinstance(form_variant, grid_i.TwoSidedFormVariant):
-                    page_variant = form_variant.variant_for_page(page_index)
+                    sheet_page_index = page_index % len(form_variant.page_variants)
+                    page_variant = form_variant.variant_for_page(sheet_page_index)
                 else:
+                    sheet_page_index = 0
                     page_variant = form_variant
 
-                # For the two-sided form, refresh the carry-over on page 1
-                # (so Student ID can be picked up from page 1 if the user
-                # wrote it there) and propagate it on subsequent pages.
-                page_carry_over = carry_over if page_index > 0 else None
+                # For two-sided forms, reset carry-over on each sheet's front page
+                # (sheet_page_index == 0) and propagate it on subsequent pages of that sheet.
+                if sheet_page_index == 0:
+                    carry_over.clear()
+                    page_carry_over = None
+                else:
+                    page_carry_over = carry_over
 
                 try:
                     (student_rows, student_answers,
@@ -337,11 +341,10 @@ def process_input(
                 for row, answers in zip(key_rows, key_answers):
                     keys_results.add(row, answers)
 
-                # After the first successful page, capture fields that we
-                # want to carry forward to subsequent pages. For the
-                # two-sided form this is the Student ID.
+                # After the first page of each sheet, capture fields that we
+                # want to carry forward to subsequent pages (e.g. Student ID).
                 if isinstance(form_variant, grid_i.TwoSidedFormVariant
-                              ) and page_index == 0:
+                              ) and sheet_page_index == 0:
                     if student_id_raw:
                         carry_over[grid_i.Field.STUDENT_ID] = student_id_raw
 

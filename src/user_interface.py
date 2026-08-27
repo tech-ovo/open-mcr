@@ -222,6 +222,7 @@ class FormVariantSelection(enum.Enum):
     VARIANT_75_Q = enum.auto()
     VARIANT_150_Q = enum.auto()
     VARIANT_225_Q_TWOSIDED = enum.auto()
+    VARIANT_240_Q_TWOSIDED = enum.auto()
 
 
 class InputFolderPickerWidget():
@@ -253,7 +254,7 @@ class InputFolderPickerWidget():
             self.__on_update, True)
         self.__form_variant_picker = SelectWidget(
             container, "Form Variant:",
-            ["75 questions", "150 questions", "225 questions (2-sided)"],
+            ["75 questions", "150 questions", "225 questions (2-sided)", "240 questions (2-sided)"],
             self.__on_update)
 
         pack(container, fill=tk.X)
@@ -274,6 +275,8 @@ class InputFolderPickerWidget():
             self.form_variant = FormVariantSelection.VARIANT_150_Q
         elif (selected_form_variant == "225 questions (2-sided)"):
             self.form_variant = FormVariantSelection.VARIANT_225_Q_TWOSIDED
+        elif (selected_form_variant == "240 questions (2-sided)"):
+            self.form_variant = FormVariantSelection.VARIANT_240_Q_TWOSIDED
 
         if self.__on_change is not None:
             self.__on_change()

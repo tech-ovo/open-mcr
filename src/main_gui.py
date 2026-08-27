@@ -27,6 +27,8 @@ form_variant = {
     user_interface.FormVariantSelection.VARIANT_150_Q: grid_i.form_150q,
     user_interface.FormVariantSelection.VARIANT_225_Q_TWOSIDED:
         grid_i.form_two_sided_225q,
+    user_interface.FormVariantSelection.VARIANT_240_Q_TWOSIDED:
+        grid_i.form_two_sided_240q,
 }[user_input.form_variant]
 progress_tracker = user_input.create_and_pack_progress(maximum=len(image_paths))
 files_timestamp = datetime.now().replace(microsecond=0)
