@@ -221,8 +221,16 @@ class SelectWidget():
 class FormVariantSelection(enum.Enum):
     VARIANT_75_Q = enum.auto()
     VARIANT_150_Q = enum.auto()
-    VARIANT_225_Q_TWOSIDED = enum.auto()
-    VARIANT_240_Q_TWOSIDED = enum.auto()
+    VARIANT_CAJCL = enum.auto()
+
+
+#: Labels shown in the form-variant dropdown, in display order.
+FORM_VARIANT_LABELS = {
+    "CAJCL State Convention (2 pages, 3 x 80 questions)":
+    FormVariantSelection.VARIANT_CAJCL,
+    "75 questions": FormVariantSelection.VARIANT_75_Q,
+    "150 questions": FormVariantSelection.VARIANT_150_Q,
+}
 
 
 class InputFolderPickerWidget():
@@ -230,6 +238,8 @@ class InputFolderPickerWidget():
     multi_answers_as_f: bool
     empty_answers_as_g: bool
     form_variant: FormVariantSelection
+    annotate: bool
+    allow_unclear_marks: bool
 
     def __init__(self,
                  parent: PackTarget,
@@ -241,7 +251,7 @@ class InputFolderPickerWidget():
         create_and_pack_label(container, "Select Input Folder", heading=True)
         create_and_pack_label(
             container,
-            "Select a folder containing the scanned multiple choice sheets.\nSheets with Student ID of '9999999999' will be treated as keys.\nAll image files in the selected folder will be processed, ignoring subfolders."
+            "Select a folder containing the scanned multiple choice sheets.\nA sheet whose Student ID is all nines is treated as an answer key.\nAll image files in the selected folder will be processed, ignoring subfolders."
         )
 
         self.__input_folder_picker = FolderPickerWidget(
@@ -253,30 +263,33 @@ class InputFolderPickerWidget():
             container, "Save empty answers in questions as 'G'.",
             self.__on_update, True)
         self.__form_variant_picker = SelectWidget(
-            container, "Form Variant:",
-            ["75 questions", "150 questions", "225 questions (2-sided)", "240 questions (2-sided)"],
+            container, "Form Variant:", list(FORM_VARIANT_LABELS),
             self.__on_update)
+        self.__annotate_checkbox = CheckboxWidget(
+            container, "Save marked-up copies of the sheets for checking.",
+            self.__on_update, reduce_padding_above=True)
+        self.__allow_unclear_checkbox = CheckboxWidget(
+            container, "Grade anyway when some marks are unclear.",
+            self.__on_update, reduce_padding_above=True)
 
         pack(container, fill=tk.X)
 
         self.folder = None
         self.multi_answers_as_f = False
         self.empty_answers_as_g = False
-        self.form_variant = FormVariantSelection.VARIANT_75_Q
+        self.annotate = False
+        self.allow_unclear_marks = False
+        self.form_variant = next(iter(FORM_VARIANT_LABELS.values()))
 
     def __on_update(self, *args: tp.Any):
         self.folder = self.__input_folder_picker.value
         self.multi_answers_as_f = self.__multi_answers_as_f_checkbox.value
         self.empty_answers_as_g = self.__empty_answers_as_g_checkbox.value
-        selected_form_variant = self.__form_variant_picker.value
-        if (selected_form_variant == "75 questions"):
-            self.form_variant = FormVariantSelection.VARIANT_75_Q
-        elif (selected_form_variant == "150 questions"):
-            self.form_variant = FormVariantSelection.VARIANT_150_Q
-        elif (selected_form_variant == "225 questions (2-sided)"):
-            self.form_variant = FormVariantSelection.VARIANT_225_Q_TWOSIDED
-        elif (selected_form_variant == "240 questions (2-sided)"):
-            self.form_variant = FormVariantSelection.VARIANT_240_Q_TWOSIDED
+        self.annotate = self.__annotate_checkbox.value
+        self.allow_unclear_marks = self.__allow_unclear_checkbox.value
+        self.form_variant = FORM_VARIANT_LABELS.get(
+            self.__form_variant_picker.value,
+            FormVariantSelection.VARIANT_CAJCL)
 
         if self.__on_change is not None:
             self.__on_change()
@@ -286,6 +299,8 @@ class InputFolderPickerWidget():
         self.__multi_answers_as_f_checkbox.disable()
         self.__empty_answers_as_g_checkbox.disable()
         self.__form_variant_picker.disable()
+        self.__annotate_checkbox.disable()
+        self.__allow_unclear_checkbox.disable()
 
 
 class OutputFolderPickerWidget():
@@ -461,6 +476,8 @@ class MainWindow:
     output_mcta: bool
     debug_mode: bool = False
     form_variant: FormVariantSelection
+    annotate: bool = False
+    allow_unclear_marks: bool = False
     cancelled: bool = False
 
     def __init__(self):
@@ -542,11 +559,11 @@ class MainWindow:
             new_status += "Using 75-question form variant.\n"
         elif self.form_variant == FormVariantSelection.VARIANT_150_Q:
             new_status += "Using 150-question form variant.\n"
-        elif self.form_variant == FormVariantSelection.VARIANT_225_Q_TWOSIDED:
+        elif self.form_variant == FormVariantSelection.VARIANT_CAJCL:
             new_status += (
-                "Using 225-question (two-sided) form variant. Scan each"
-                "\nstudent's sheet as a 2-page PDF (or one image per side);"
-                "\nresults will be output as three rows per student.\n")
+                "Using the CAJCL State Convention form. Scan every sheet"
+                "\nfront page first; a whole batch can be one PDF."
+                "\nResults are output as three rows per student.\n")
 
         output_folder = self.__output_folder_picker.folder
         if output_folder is None:
@@ -554,16 +571,16 @@ class MainWindow:
             ok_to_submit = False
         else:
             self.output_folder = output_folder
-            new_status += f"✔ Output folder selected.\n"
+            new_status += "✔ Output folder selected.\n"
 
         keys_file = self.__answer_key_picker.file
         self.keys_file = None
         if keys_file:
             if scoring.verify_answer_key_sheet(keys_file):
                 self.keys_file = keys_file
-                new_status += f"✔ Selected answer keys file appears to be valid.\n"
+                new_status += "✔ Selected answer keys file appears to be valid.\n"
             else:
-                new_status += f"❌ Selected answer keys file is not valid.\n"
+                new_status += "❌ Selected answer keys file is not valid.\n"
                 ok_to_submit = False
 
         arrangement_map = self.__arrangement_map_picker.file
@@ -571,28 +588,37 @@ class MainWindow:
         if arrangement_map:
             if scoring.verify_answer_key_sheet(arrangement_map):
                 self.arrangement_map = arrangement_map
-                new_status += f"✔ Selected key arrangement file appears to be valid.\n"
+                new_status += "✔ Selected key arrangement file appears to be valid.\n"
             else:
-                new_status += f"❌ Selected key arrangement file is not valid.\n"
+                new_status += "❌ Selected key arrangement file is not valid.\n"
                 ok_to_submit = False
+
+        self.annotate = self.__input_folder_picker.annotate
+        if self.annotate:
+            new_status += "Marked-up copies of the sheets will be saved.\n"
+
+        self.allow_unclear_marks = (
+            self.__input_folder_picker.allow_unclear_marks)
+        if self.allow_unclear_marks:
+            new_status += "Unclear marks will be reported but will not stop grading.\n"
 
         self.multi_answers_as_f = self.__input_folder_picker.multi_answers_as_f
         if self.multi_answers_as_f:
-            new_status += f"Questions with multiple answers selected will be output as 'F'.\n"
+            new_status += "Questions with multiple answers selected will be output as 'F'.\n"
         else:
-            new_status += f"Questions with multiple answers selected will be output in '[A|B]' form.\n"
+            new_status += "Questions with multiple answers selected will be output in '[A|B]' form.\n"
 
         self.empty_answers_as_g = self.__input_folder_picker.empty_answers_as_g
         if self.empty_answers_as_g:
-            new_status += f"Unanswered questions will be output as 'G'.\n"
+            new_status += "Unanswered questions will be output as 'G'.\n"
         else:
-            new_status += f"Unanswered questions will be left as blank cells.\n"
+            new_status += "Unanswered questions will be left as blank cells.\n"
 
         self.sort_results = self.__output_folder_picker.sort_results
         if self.sort_results:
-            new_status += f"Results will be sorted by name.\n"
+            new_status += "Results will be sorted by name.\n"
         else:
-            new_status += f"Input sort order will be maintained.\n"
+            new_status += "Input sort order will be maintained.\n"
 
 
         self.output_mcta = self.__output_folder_picker.output_mcta
@@ -628,30 +654,24 @@ class MainWindow:
             subprocess.Popen([helpfile], shell=True)
 
     def __show_sheet(self):
-        if (self.form_variant == FormVariantSelection.VARIANT_75_Q):
-            helpfile = str(
-                Path(__file__).parent / "assets" /
-                "multiple_choice_sheet_75q.pdf")
-            if platform.system() in ('Darwin','Linux'):
-                subprocess.Popen(['open', helpfile])
-            else:
-                subprocess.Popen([helpfile], shell=True)
-        elif (self.form_variant == FormVariantSelection.VARIANT_150_Q):
-            helpfile = str(
-                Path(__file__).parent / "assets" /
-                "multiple_choice_sheet_150q.pdf")
-            if platform.system() in ('Darwin','Linux'):
-                subprocess.Popen(['open', helpfile])
-            else:
-                subprocess.Popen([helpfile], shell=True)
-        elif (self.form_variant == FormVariantSelection.VARIANT_225_Q_TWOSIDED):
-            helpfile = str(
-                Path(__file__).parent / "assets" /
-                "multiple_choice_sheet_240q_twosided.pdf")
-            if platform.system() in ('Darwin','Linux'):
-                subprocess.Popen(['open', helpfile])
-            else:
-                subprocess.Popen([helpfile], shell=True)
+        sheets = {
+            FormVariantSelection.VARIANT_75_Q:
+            "multiple_choice_sheet_75q.pdf",
+            FormVariantSelection.VARIANT_150_Q:
+            "multiple_choice_sheet_150q.pdf",
+            FormVariantSelection.VARIANT_CAJCL: "cajcl_answer_sheet.pdf",
+        }
+        sheet = sheets.get(self.form_variant)
+        if sheet is None:
+            return
+        self.__open_file(str(Path(__file__).parent / "assets" / sheet))
+
+    @staticmethod
+    def __open_file(path: str):
+        if platform.system() in ('Darwin', 'Linux'):
+            subprocess.Popen(['open', path])
+        else:
+            subprocess.Popen([path], shell=True)
 
     def __on_close(self):
         self.__app.destroy()

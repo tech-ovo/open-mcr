@@ -1,26 +1,8 @@
 """General mathematics utilities."""
 
-import enum
 import typing as tp
 
 from . import list_utils
-
-
-class InequalityTypes(enum.Enum):
-    """Represents all the possible inequality types.
-
-    Members:
-        GTE: Greater than or equal to (`>=`).
-        LTE: Less than or equal to (`<=`).
-        GT: Greater than (`>`).
-        LT: Less than (`<`).
-        NE: Not equal (`!=`).
-    """
-    GTE = enum.auto()
-    LTE = enum.auto()
-    GT = enum.auto()
-    LT = enum.auto()
-    NE = enum.auto()
 
 
 def is_approx_equal(value_a: float, value_b: float,

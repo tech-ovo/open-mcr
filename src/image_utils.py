@@ -12,6 +12,10 @@ from . import geometry_utils
 SUPPORTED_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"]
 SUPPORTED_MULTIPAGE_EXTENSIONS = [".pdf", ".tif", ".tiff"]
 
+#: PDF pages are rasterised at this multiple of 72 dpi (so 2 -> 144 dpi).
+#: High enough to resolve bubbles, low enough to keep large batches fast.
+PDF_RENDER_SCALE = 2
+
 
 class UnsupportedImageError(ValueError):
     """Raised when an input file is not a supported image type."""
@@ -26,16 +30,20 @@ def _try_load_pdf_pages(path: pathlib.PurePath) -> tp.Optional[tp.List[np.ndarra
     except ImportError:
         pdfium = None  # type: ignore
     if pdfium is not None:
+        doc = None
         try:
             doc = pdfium.PdfDocument(str(path))
             pages = []
             for i in range(len(doc)):
                 page = doc[i]
-                pil_image = page.render(scale=2).to_pil()
+                pil_image = page.render(scale=PDF_RENDER_SCALE).to_pil()
                 pages.append(cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR))
             return pages
         except Exception:
             return None
+        finally:
+            if doc is not None:
+                doc.close()
 
     # Fall back to pdf2image (requires poppler)
     try:
@@ -61,6 +69,75 @@ def _try_load_multipage_tiff(path: pathlib.PurePath) -> tp.Optional[tp.List[np.n
     if isinstance(frames, np.ndarray) and frames.ndim == 3:
         return [frames]
     return [f for f in frames]
+
+
+def count_image_pages(path: pathlib.PurePath) -> int:
+    """Return the number of pages in an image file without decoding them all.
+
+    Used to plan a batch (which pages pair into which sheets) before spending
+    the memory to render them. Raises UnsupportedImageError for file types
+    this software cannot read.
+    """
+    suffix = "".join(path.suffixes).lower()
+    if (suffix not in SUPPORTED_IMAGE_EXTENSIONS
+            and suffix not in SUPPORTED_MULTIPAGE_EXTENSIONS):
+        raise UnsupportedImageError(f"Unsupported file type: {suffix}")
+
+    if suffix == ".pdf":
+        try:
+            import pypdfium2 as pdfium  # type: ignore
+        except ImportError:
+            pass
+        else:
+            doc = None
+            try:
+                doc = pdfium.PdfDocument(str(path))
+                return len(doc)
+            except Exception as error:
+                raise UnsupportedImageError(
+                    f"Could not read PDF '{path.name}': {error}")
+            finally:
+                if doc is not None:
+                    doc.close()
+        return len(load_image_pages(path))
+
+    if suffix in (".tif", ".tiff"):
+        return len(load_image_pages(path))
+
+    return 1
+
+
+def iter_image_pages(path: pathlib.PurePath) -> tp.Iterator[np.ndarray]:
+    """Yield the pages of an image file one at a time.
+
+    For PDFs this renders lazily, so a several-hundred-page batch never has
+    more than one page decoded at a time.
+    """
+    suffix = "".join(path.suffixes).lower()
+    if suffix == ".pdf":
+        try:
+            import pypdfium2 as pdfium  # type: ignore
+        except ImportError:
+            pdfium = None  # type: ignore
+        if pdfium is not None:
+            try:
+                doc = pdfium.PdfDocument(str(path))
+            except Exception:
+                doc = None
+            if doc is not None:
+                # Closed explicitly: on Windows an open pdfium document keeps
+                # a lock on the user's input file.
+                try:
+                    for index in range(len(doc)):
+                        pil_image = doc[index].render(
+                            scale=PDF_RENDER_SCALE).to_pil()
+                        yield cv2.cvtColor(np.array(pil_image),
+                                           cv2.COLOR_RGB2BGR)
+                finally:
+                    doc.close()
+                return
+    for page in load_image_pages(path):
+        yield page
 
 
 def load_image_pages(path: pathlib.PurePath) -> tp.List[np.ndarray]:
@@ -155,23 +232,6 @@ def find_contours(edges: np.ndarray) -> np.ndarray:
     contours, _ = cv2.findContours(edges, cv2.RETR_TREE,
                                    cv2.CHAIN_APPROX_SIMPLE)
     return contours
-
-
-def get_image(path: pathlib.PurePath,
-              save_path: tp.Optional[pathlib.PurePath] = None) -> np.ndarray:
-    """Returns the cv2 image located at the given path.
-
-    For backwards compatibility this returns the first page of a multi-page
-    image. Prefer `load_image_pages` for new code.
-
-    If `save_path` is provided, will save the resulting image to this location
-    as "original.jpg". Used for debugging purposes.
-    """
-    pages = load_image_pages(path)
-    result = pages[0]
-    if save_path:
-        save_image(save_path / "original.jpg", result)
-    return result
 
 
 def save_image(path: pathlib.PurePath, image: np.ndarray):

@@ -195,19 +195,22 @@ class _GridField(abc.ABC):
         ]
         return filled
 
-    def get_cell_matrixes(self) -> tp.List[ma.MaskedArray]:
-        results: tp.List[ma.MaskedArray] = []
+    def cell_coordinates(self) -> tp.List[tp.Tuple[int, int]]:
+        """The `(across, down)` grid coordinate of each bubble in this field."""
         is_vertical = self.orientation is geometry_utils.Orientation.VERTICAL
-        for i in range(self.num_cells):
-            x = self.horizontal_start if is_vertical else self.horizontal_start + i
-            y = self.vertical_start if not is_vertical else self.vertical_start + i
+        return [(self.horizontal_start
+                 if is_vertical else self.horizontal_start + i,
+                 self.vertical_start + i
+                 if is_vertical else self.vertical_start)
+                for i in range(self.num_cells)]
 
-            # Have to crop the edges to avoid getting the borders of the write-in
-            # squares in the cells
-            matrix = self.grid.get_masked_cell_matrix(x, y)
-
-            results.append(matrix)
-        return results
+    def get_cell_matrixes(self) -> tp.List[ma.MaskedArray]:
+        # Have to crop the edges to avoid getting the borders of the write-in
+        # squares in the cells
+        return [
+            self.grid.get_masked_cell_matrix(x, y)
+            for x, y in self.cell_coordinates()
+        ]
 
     def get_all_fill_percents(self) -> tp.List[float]:
         results = [
@@ -341,85 +344,6 @@ def get_group_from_info(info: grid_info.GridGroupInfo,
                                     info.cell_orientation)
 
 
-def read_field(field: grid_info.Field, grid: Grid, threshold: float,
-               form_variant: grid_info.FormVariant,
-               fill_percents: tp.List[tp.List[float]]
-               ) -> tp.Optional[tp.List[tp.Union[tp.List[str], tp.List[int]]]]:
-    """Shortcut to read a single-valued field. If the field has multiple
-    instances on the sheet, only the first is returned."""
-    grid_group_info = form_variant.fields[field]
-    if grid_group_info is None:
-        return None
-    if isinstance(grid_group_info, list):
-        if not grid_group_info:
-            return None
-        grid_group_info = grid_group_info[0]
-    grid_group = get_group_from_info(grid_group_info, grid)
-    # Handle multi‑column fields where fill_percents is a list of lists.
-    if isinstance(fill_percents[0], list):
-        combined: tp.List[tp.Union[tp.List[str], tp.List[int]]] = []
-        for sub_fill in fill_percents:
-            val = grid_group.read_value(threshold, sub_fill)
-            if isinstance(val, list):
-                combined.extend(val)
-            else:
-                combined.append(val)
-        return combined
-    # Single‑column field.
-    return grid_group.read_value(threshold, fill_percents)
-
-
-def read_field_instance(
-        field: grid_info.Field, instance: int, grid: Grid, threshold: float,
-        form_variant: grid_info.FormVariant,
-        fill_percents: tp.List[tp.List[float]]
-) -> tp.Optional[tp.List[tp.Union[tp.List[str], tp.List[int]]]]:
-    """Read a specific instance of a field, for fields that have multiple
-    GridGroupInfo entries on the sheet (used by the two-sided variant)."""
-    grid_group_info = form_variant.fields[field]
-    if grid_group_info is None:
-        return None
-    if isinstance(grid_group_info, list):
-        if instance >= len(grid_group_info):
-            return None
-        grid_group_info = grid_group_info[instance]
-    if instance > 0:
-        # Single-valued field requested with a non-zero instance - nothing
-        # to read.
-        return None
-    return get_group_from_info(grid_group_info,
-                               grid).read_value(threshold, fill_percents)
-
-
-def read_all_field_instances(
-        field: grid_info.Field, grid: Grid, threshold: float,
-        form_variant: grid_info.FormVariant,
-        fill_percents: tp.List[tp.List[float]]
-) -> tp.List[tp.List[tp.Union[tp.List[str], tp.List[int]]]]:
-    """Read all instances of a field. Returns a list (possibly empty) of the
-    read values, one per instance."""
-    grid_group_info = form_variant.fields[field]
-    if grid_group_info is None:
-        return []
-    if isinstance(grid_group_info, list):
-        infos = grid_group_info
-    else:
-        infos = [grid_group_info]
-    return [
-        get_group_from_info(info, grid).read_value(threshold, fill_percents)
-        for info in infos
-    ]
-
-
-def read_answer(question: int, grid: Grid, threshold: float,
-                form_variant: grid_info.FormVariant,
-                fill_percents: tp.List[tp.List[float]]
-                ) -> tp.List[tp.Union[tp.List[str], tp.List[int]]]:
-    """Shortcut to read a field given just the key for it and the grid object."""
-    return get_group_from_info(form_variant.questions[question],
-                               grid).read_value(threshold, fill_percents)
-
-
 def read_answer_column(
         column_index: int, question_index: int, grid: Grid, threshold: float,
         form_variant: grid_info.FormVariant,
@@ -463,21 +387,23 @@ def get_field_fill_percents(
     return [get_group_from_info(info, grid).get_all_fill_percents() for info in infos]
 
 
-def get_first_field_fill_percents(
-        field: grid_info.Field, grid: Grid,
-        form_variant: grid_info.FormVariant
-) -> tp.Optional[tp.List[tp.List[float]]]:
-    """Convenience wrapper for fields with a single instance (or when only
-    the first instance is needed)."""
-    grid_group_info = form_variant.fields[field]
-    if grid_group_info is None:
-        return None
-    if isinstance(grid_group_info, list):
-        if not grid_group_info:
-            return None
-        grid_group_info = grid_group_info[0]
-    return get_group_from_info(grid_group_info,
-                               grid).get_all_fill_percents()
+def get_group_cell_circles(
+        info: grid_info.GridGroupInfo, grid: Grid
+) -> tp.List[tp.List[tp.Tuple[float, float, float]]]:
+    """Locate every bubble of a group in the source image.
+
+    Returns one list of `(x, y, radius)` circles per field in the group, in the
+    same order as the fill percents. Used to draw the marked-up PDF.
+    """
+    group = get_group_from_info(info, grid)
+    circles: tp.List[tp.List[tp.Tuple[float, float, float]]] = []
+    for field in group.fields:
+        field_circles: tp.List[tp.Tuple[float, float, float]] = []
+        for across, down in field.cell_coordinates():
+            centre, radius = grid.get_cell_circle(across, down)
+            field_circles.append((centre.x, centre.y, radius))
+        circles.append(field_circles)
+    return circles
 
 
 def field_group_to_string(
@@ -492,34 +418,6 @@ def field_group_to_string(
             value_as_strings = [str(el) for el in value]
             result_strings.append(f'[{"|".join(value_as_strings)}]')
     return "".join(result_strings).strip()
-
-
-def read_field_as_string(field: grid_info.Field, grid: Grid, threshold: float,
-                         form_variant: grid_info.FormVariant,
-                         fill_percents: tp.List[tp.List[float]]
-                         ) -> tp.Optional[str]:
-    """Shortcut to read a field and format it as a string, given just the key and
-    the grid object. """
-    field_group = read_field(field, grid, threshold, form_variant,
-                             fill_percents)
-    if field_group is not None:
-        return field_group_to_string(field_group)
-    else:
-        return None
-
-
-def read_answer_as_string(question: int, grid: Grid, multi_answers_as_f: bool,
-                          threshold: float,
-                          form_variant: grid_info.FormVariant,
-                          fill_percents: tp.List[tp.List[float]]) -> str:
-    """Shortcut to read a question's answer and format it as a string, given
-    just the question number and the grid object. """
-    answer = field_group_to_string(
-        read_answer(question, grid, threshold, form_variant, fill_percents))
-    if not multi_answers_as_f or "|" not in answer:
-        return answer
-    else:
-        return "F"
 
 
 def calculate_bubble_fill_threshold(

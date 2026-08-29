@@ -3,9 +3,12 @@ import typing as tp
 
 from . import alphabet
 from . import geometry_utils
+from . import sheet_layout
 Orientation = geometry_utils.Orientation
 
-KEY_STUDENT_ID = "99999"
+#: A sheet whose Student ID is all nines is an answer key rather than a
+#: student's paper. The CAJCL sheet uses a 4-digit ID, so that is "9999".
+KEY_STUDENT_ID = sheet_layout.KEY_STUDENT_ID
 
 # Default grid dimensions used by the legacy single-page variants (75q and 150q).
 GRID_HORIZONTAL_CELLS = 36
@@ -20,6 +23,8 @@ class Field(enum.Enum):
     TEST_FORM_CODE = enum.auto()
     STUDENT_ID = enum.auto()
     COURSE_ID = enum.auto()
+    LATIN_LEVEL = enum.auto()
+    PAGE_CODE = enum.auto()
     IMAGE_FILE = enum.auto()
 
 
@@ -84,10 +89,6 @@ class GridGroupInfo():
 FieldValue = tp.Union[GridGroupInfo, tp.List[GridGroupInfo], None]
 
 
-def _is_field_list(value: FieldValue) -> bool:
-    return isinstance(value, list)
-
-
 class FormVariant():
     """Description of a bubble-sheet form."""
 
@@ -98,6 +99,10 @@ class FormVariant():
     basis_width: float
     basis_height: float
     y_shift: float
+    output_fields: tp.List[Field]
+    key_student_id: str
+    l_mark_offset: tp.Tuple[float, float]
+    review_marks_by_default: bool
 
     def __init__(
             self,
@@ -109,7 +114,11 @@ class FormVariant():
             vertical_cells: int = GRID_VERTICAL_CELLS,
             basis_width: float = 49.5,
             basis_height: float = 31.75,
-            y_shift: float = 0.0):
+            y_shift: float = 0.0,
+            output_fields: tp.Optional[tp.List[Field]] = None,
+            l_mark_offset: tp.Tuple[float, float] = (0.15625 / 7.5,
+                                                     0.15625 / 10.0),
+            review_marks_by_default: bool = False):
         self.fields = dict(fields)
         if isinstance(questions, GridGroupInfo):
             self.question_columns = [[questions]]
@@ -122,6 +131,27 @@ class FormVariant():
         self.basis_width = basis_width
         self.basis_height = basis_height
         self.y_shift = y_shift
+        # Where this sheet's L-mark sits relative to the grid corner; see
+        # `corner_finding.DEFAULT_L_MARK_OFFSET`.
+        self.l_mark_offset = l_mark_offset
+        # Whether to hold every mark to the legibility bar in `mark_quality`
+        # unless the operator says otherwise. On for the CAJCL sheet, whose
+        # workflow is "when in doubt, grade it by hand"; off for the legacy
+        # sheets, whose scans predate the check and whose behaviour should not
+        # change under it.
+        self.review_marks_by_default = review_marks_by_default
+        # Columns to write to the results CSV. Defaults to every field that
+        # exists on the page; variants override it to hide bookkeeping fields
+        # (such as the page code) or to fix the column order.
+        self.output_fields = (list(output_fields) if output_fields is not None
+                              else list(self.fields.keys()))
+        # A sheet whose Student ID is all nines is an answer key. How many
+        # nines depends on how many digit columns the variant prints.
+        student_id = self.fields.get(Field.STUDENT_ID)
+        if isinstance(student_id, list):
+            student_id = student_id[0] if student_id else None
+        self.key_student_id = ("9" * student_id.num_fields
+                               if student_id is not None else KEY_STUDENT_ID)
 
     @property
     def questions(self) -> tp.List[GridGroupInfo]:
@@ -182,173 +212,181 @@ form_150q = FormVariant(
         for i in range(150)
     ])
 
+
 # ---------------------------------------------------------------------------
-# Two-sided 240-question variant (3 MCQ columns x 80 questions).
+# CAJCL State Convention variant: two pages, three 80-question tests.
+#
+# Every coordinate below is read out of `sheet_layout`, which is also what
+# `sheet_generation` draws from, so the grid the reader looks for and the
+# sheet that gets printed cannot drift apart.
 # ---------------------------------------------------------------------------
 
-TWOSIDED_HORIZONTAL_CELLS = 24
-TWOSIDED_VERTICAL_CELLS = 60
-TWOSIDED_BASIS_WIDTH = 49.5
-TWOSIDED_BASIS_HEIGHT = (TWOSIDED_VERTICAL_CELLS / GRID_VERTICAL_CELLS) * 31.75
+
+def _digit_field(first_column: int) -> GridGroupInfo:
+    """A block of digit columns: fields run left to right, bubbles top to
+    bottom within each column."""
+    return GridGroupInfo(
+        first_column,
+        sheet_layout.ID_FIRST_BUBBLE_ROW,
+        num_fields=sheet_layout.ID_DIGITS,
+        fields_type=FieldType.NUMBER,
+        field_length=sheet_layout.BUBBLES_PER_DIGIT,
+        field_orientation=Orientation.HORIZONTAL,
+        cell_orientation=Orientation.VERTICAL,
+    )
 
 
-def _make_mcq_column_split(vertical_start: int,
-                           *half_specs: tp.Tuple[int, int]
-                           ) -> tp.List[GridGroupInfo]:
+def _single_choice_field(column: int, row: int, options: int,
+                         orientation: Orientation) -> GridGroupInfo:
+    """One field whose `options` bubbles run along `orientation`."""
+    return GridGroupInfo(
+        column,
+        row,
+        num_fields=1,
+        fields_type=FieldType.NUMBER,
+        field_length=options,
+        field_orientation=orientation,
+        cell_orientation=orientation,
+    )
+
+
+def _answer_column(page_index: int, test_on_page: int
+                   ) -> tp.List[GridGroupInfo]:
+    """The 80 questions of one test, read in printed order: the 40 rows of the
+    left block followed by the 40 rows of the right block."""
     questions: tp.List[GridGroupInfo] = []
-    for h_start, count in half_specs:
-        for i in range(count):
+    for column in sheet_layout.PAGE_SUBCOLUMNS[page_index][test_on_page]:
+        for offset in range(sheet_layout.ROWS_PER_SUBCOLUMN):
             questions.append(
-                GridGroupInfo(h_start,
-                              vertical_start + i,
+                GridGroupInfo(column,
+                              sheet_layout.MCQ_FIRST_ROW + offset,
                               fields_type=FieldType.LETTER,
-                              field_length=5,
+                              field_length=len(sheet_layout.OPTIONS),
                               field_orientation=Orientation.HORIZONTAL))
     return questions
 
 
-def _make_two_sided_variant(
-        fields: tp.Dict[Field, FieldValue],
-        question_columns: tp.List[tp.List[GridGroupInfo]],
-        y_shift: float = 0.0) -> FormVariant:
-    return FormVariant(fields,
-                       question_columns,
-                       horizontal_cells=TWOSIDED_HORIZONTAL_CELLS,
-                       vertical_cells=TWOSIDED_VERTICAL_CELLS,
-                       basis_width=TWOSIDED_BASIS_WIDTH,
-                       basis_height=TWOSIDED_BASIS_HEIGHT,
-                       y_shift=y_shift)
+def _cajcl_page(page_index: int, fields: tp.Dict[Field, FieldValue],
+                output_fields: tp.List[Field]) -> FormVariant:
+    return FormVariant(
+        fields,
+        [
+            _answer_column(page_index, test_on_page) for test_on_page in
+            range(len(sheet_layout.PAGE_SUBCOLUMNS[page_index]))
+        ],
+        horizontal_cells=sheet_layout.GRID_COLUMNS,
+        vertical_cells=sheet_layout.GRID_ROWS,
+        basis_width=sheet_layout.BASIS_WIDTH,
+        basis_height=sheet_layout.BASIS_HEIGHT,
+        output_fields=output_fields,
+        l_mark_offset=sheet_layout.L_MARK_OFFSET_FRACTION,
+        review_marks_by_default=True,
+    )
 
-# Page 1:
-# Col 1: Student ID (5 digits, column 2)
-# Col 2: Test 1 MCQ (sub1: col 13, sub2: col 19)
-form_240q_page1 = _make_two_sided_variant(
+
+#: Column order of the results CSV. `Field.PAGE_CODE` is deliberately absent:
+#: it is bookkeeping used to verify page order, not exam data.
+CAJCL_OUTPUT_FIELDS: tp.List[Field] = [
+    Field.STUDENT_ID,
+    Field.LATIN_LEVEL,
+    Field.TEST_FORM_CODE,
+    Field.IMAGE_FILE,
+]
+
+_PAGE_CODE_FIELD = _single_choice_field(sheet_layout.PAGE_CODE_FIRST_COLUMN,
+                                        sheet_layout.PAGE_CODE_ROW,
+                                        sheet_layout.PAGE_CODE_OPTIONS,
+                                        Orientation.HORIZONTAL)
+
+form_cajcl_page1 = _cajcl_page(
+    0,
     {
-        # Student ID: 5 columns of digits, each column has 10 bubbles (0-9).
-        # Fields go left→right (HORIZONTAL), bubbles within each column go top→bottom (VERTICAL).
-        Field.STUDENT_ID: GridGroupInfo(
-            2,                           # column where the first digit starts
-            4,                           # row where bubbles start (row 4 = first bubble row)
-            num_fields=5,                # five digit columns
-            fields_type=FieldType.NUMBER,
-            field_length=10,             # ten bubbles per digit (0-9)
-            field_orientation=Orientation.HORIZONTAL,
-            cell_orientation=Orientation.VERTICAL,
-        ),
-        Field.TEST_FORM_CODE: GridGroupInfo(13, 2, 4),
+        Field.PAGE_CODE: _PAGE_CODE_FIELD,
+        Field.STUDENT_ID: _digit_field(sheet_layout.STUDENT_ID_COLUMN),
+        Field.LATIN_LEVEL: _single_choice_field(
+            sheet_layout.LATIN_LEVEL_COLUMN,
+            sheet_layout.LATIN_LEVEL_FIRST_ROW,
+            len(sheet_layout.LATIN_LEVELS), Orientation.VERTICAL),
+        Field.TEST_FORM_CODE: _digit_field(
+            sheet_layout.PAGE_TEST_ID_COLUMNS[0][0]),
     },
-    [
-        _make_mcq_column_split(16, (13, 40), (19, 40)),
-    ],
+    CAJCL_OUTPUT_FIELDS,
 )
 
-# Page 2:
-# Col 1: Test 2 (sub1: col 1, sub2: col 7)
-# Col 2: Test 3 (sub1: col 13, sub2: col 19)
-form_240q_page2 = _make_two_sided_variant(
+form_cajcl_page2 = _cajcl_page(
+    1,
     {
+        Field.PAGE_CODE: _PAGE_CODE_FIELD,
+        # Repeated on the back so a page that gets separated from its front
+        # can still be identified (and so mis-collated batches are caught).
+        Field.STUDENT_ID: _digit_field(sheet_layout.STUDENT_ID_COLUMN),
+        # One Test ID per answer column on this page.
         Field.TEST_FORM_CODE: [
-            GridGroupInfo(1, 1, 4),
-            GridGroupInfo(13, 1, 4),
+            _digit_field(column)
+            for column in sheet_layout.PAGE_TEST_ID_COLUMNS[1]
         ],
     },
-    [
-        _make_mcq_column_split(32, (1, 40), (7, 40)),
-        _make_mcq_column_split(48, (13, 40), (19, 40)),
-    ],
+    CAJCL_OUTPUT_FIELDS,
 )
 
 
 class TwoSidedFormVariant():
-    """Variant with two pages. Holds separate per-page FormVariant configurations."""
+    """A variant printed on two pages, with a separate layout for each side."""
 
     page_variants: tp.List[FormVariant]
 
     def __init__(self, page_variants: tp.List[FormVariant]):
         assert isinstance(page_variants, list)
-        assert len(page_variants) == 2
+        assert len(page_variants) == sheet_layout.PAGES_PER_SHEET
         self.page_variants = page_variants
 
     def variant_for_page(self, page_index: int) -> FormVariant:
         return self.page_variants[page_index % len(self.page_variants)]
 
+    @property
+    def pages_per_sheet(self) -> int:
+        return len(self.page_variants)
 
-# The two-sided 240q form combines two page variants.
-form_240q = TwoSidedFormVariant([form_240q_page1, form_240q_page2])
+    @property
+    def questions_per_column(self) -> int:
+        return max(v.questions_per_column for v in self.page_variants)
 
-# Alias for backward compatibility / main script expectation
-form_two_sided_240q = form_240q
+    @property
+    def output_fields(self) -> tp.List[Field]:
+        return list(self.page_variants[0].output_fields)
+
+    @property
+    def key_student_id(self) -> str:
+        return self.page_variants[0].key_student_id
+
+    @property
+    def l_mark_offset(self) -> tp.Tuple[float, float]:
+        return self.page_variants[0].l_mark_offset
+
+    @property
+    def review_marks_by_default(self) -> bool:
+        return self.page_variants[0].review_marks_by_default
+
+    @property
+    def tests_per_sheet(self) -> int:
+        return sum(
+            len(v.question_columns) for v in self.page_variants)
 
 
-def _make_mcq_column_split_v2(specs: tp.List[tp.Tuple[int, int, int]]) -> tp.List[GridGroupInfo]:
-    questions: tp.List[GridGroupInfo] = []
-    for h_start, v_start, count in specs:
-        for i in range(count):
-            questions.append(
-                GridGroupInfo(h_start,
-                              v_start + i,
-                              fields_type=FieldType.LETTER,
-                              field_length=5,
-                              field_orientation=Orientation.HORIZONTAL))
-    return questions
+form_cajcl = TwoSidedFormVariant([form_cajcl_page1, form_cajcl_page2])
+
+#: Fields whose value is read on the front page and belongs to the whole
+#: sheet, so it is carried forward onto the rows produced by the back page.
+CARRY_OVER_FIELDS: tp.Tuple[Field, ...] = (Field.STUDENT_ID,
+                                           Field.LATIN_LEVEL)
 
 
-form_225q_page1 = _make_two_sided_variant(
-    {
-        Field.STUDENT_ID: GridGroupInfo(
-            2,
-            6,   # PDF row 6 = digit-0 bubble (SID_ROW=5, field_digits draws at row_start+1+digit)
-            num_fields=5,
-            fields_type=FieldType.NUMBER,
-            field_length=10,
-            field_orientation=Orientation.HORIZONTAL,
-            cell_orientation=Orientation.VERTICAL,
-        ),
-        Field.TEST_FORM_CODE: GridGroupInfo(
-            13,
-            6,   # same as SID
-            num_fields=4,
-            fields_type=FieldType.NUMBER,
-            field_length=10,
-            field_orientation=Orientation.HORIZONTAL,
-            cell_orientation=Orientation.VERTICAL,
-        ),
-    },
-    [
-        _make_mcq_column_split_v2([(13, 19, 38), (19, 19, 37)]),
-    ],
-    y_shift=0.006,
-)
-
-form_225q_page2 = _make_two_sided_variant(
-    {
-        Field.TEST_FORM_CODE: [
-            GridGroupInfo(
-                0,
-                6,   # PDF row 6 = digit-0 bubble
-                num_fields=4,
-                fields_type=FieldType.NUMBER,
-                field_length=10,
-                field_orientation=Orientation.HORIZONTAL,
-                cell_orientation=Orientation.VERTICAL,
-            ),
-            GridGroupInfo(
-                13,
-                6,
-                num_fields=4,
-                fields_type=FieldType.NUMBER,
-                field_length=10,
-                field_orientation=Orientation.HORIZONTAL,
-                cell_orientation=Orientation.VERTICAL,
-            ),
-        ],
-    },
-    [
-        _make_mcq_column_split_v2([(0, 19, 38), (6, 19, 37)]),
-        _make_mcq_column_split_v2([(13, 19, 38), (19, 19, 37)]),
-    ],
-    y_shift=0.006,
-)
-
-form_two_sided_225q = TwoSidedFormVariant([form_225q_page1, form_225q_page2])
-
+def latin_level_name(raw_value: str) -> str:
+    """Map the bubbled Latin level index onto its printed name."""
+    digits = "".join(ch for ch in raw_value if ch.isdigit())
+    if not digits:
+        return ""
+    index = int(digits)
+    if 0 <= index < len(sheet_layout.LATIN_LEVELS):
+        return sheet_layout.LATIN_LEVELS[index]
+    return ""

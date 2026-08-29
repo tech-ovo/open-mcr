@@ -140,3 +140,6 @@ manual.pdf
 
 # E2E Test Output
 /test/end-to-end/**/actual_output
+
+# macOS Finder metadata
+.DS_Store

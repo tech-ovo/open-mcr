@@ -17,6 +17,8 @@ COLUMN_NAMES: tp.Dict[RealOrVirtualField, str] = {
     Field.TEST_FORM_CODE: "Test Form Code",
     Field.STUDENT_ID: "Student ID",
     Field.COURSE_ID: "Course ID",
+    Field.LATIN_LEVEL: "Latin Level",
+    Field.PAGE_CODE: "Page",
     Field.IMAGE_FILE: 'Source File',
     VirtualField.SCORE: "Total Score (%)",
     VirtualField.POINTS: "Total Points"

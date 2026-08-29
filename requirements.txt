@@ -1,7 +1,57 @@
-PyInstaller==3.5
-typing==3.7.4.1
-numpy==1.22.0
-opencv-python==4.5.4.60
-flake8==3.7.8
-yapf==0.28.0
-pytest==6.2.5
+# Requires Python 3.10 or newer. Verified on 3.12 and 3.13.
+#
+# Version ranges rather than exact pins: the lower bound is the oldest release
+# verified to work here, and the upper bound stops a future major version from
+# arriving unannounced. Every lower bound below was installed and run against
+# the full test suite on Python 3.13, so none of them is a guess.
+#
+# The `typing` backport that used to be pinned here has been removed. It was
+# only ever needed for Python 3.4, and on a modern interpreter it shadows the
+# standard library's own `typing` module.
+
+# --- runtime -------------------------------------------------------------
+
+# 2.1 is the first release with CPython 3.13 wheels. NumPy 2 removed a number
+# of long-deprecated aliases (np.float_, np.object, np.in1d, ...); none of them
+# is used in this project.
+numpy>=2.1,<3
+
+# 4.11 is the first release to claim CPython 3.13 support, and 4.10 was the
+# first built against NumPy 2 - anything older raises "a module compiled using
+# NumPy 1.x cannot be run in NumPy 2.x" at import. The wheels are tagged
+# cp37-abi3, so one build serves every interpreter from 3.7 up.
+# This project never calls cv2's HighGUI (no imshow/waitKey), so
+# opencv-python-headless works just as well and makes a smaller PyInstaller
+# bundle if you would rather use it.
+opencv-python>=4.11,<6
+
+# Reads scanned PDFs, and rasterises pages one at a time so a large batch does
+# not have to be held in memory.
+pypdfium2>=4.30,<6
+
+# Draws the printable answer sheet (src/sheet_generation.py). The sheet passes
+# charSpace= to Canvas.drawString, which rules out anything before 3.6;
+# reportlab 5 dropped the older Canvas.setCharSpace method, which this project
+# does not use.
+reportlab>=4.2,<6
+
+# Assembles the marked-up PDFs written by --annotate. 10.4 is the first release
+# with CPython 3.13 wheels.
+Pillow>=10.4,<14
+
+# --- development and packaging -------------------------------------------
+# Not needed to grade exams. Install with `pip install -r requirements.txt`
+# as usual, or skip this file's second half if you only want to run the tool.
+
+pytest>=8.3,<10
+
+flake8>=7.1,<8
+
+# 0.40 is the first release to vendor its own copy of lib2to3, which Python
+# 3.13 dropped from the standard library. 0.40.0 and 0.40.1 are yanked on PyPI.
+yapf>=0.40.2,<1
+
+# 6.11 is the first release supporting CPython 3.13. PyInstaller 6 moved
+# everything except the executable into an `_internal` folder - see
+# build_instructions.md, which has been updated to match.
+pyinstaller>=6.11,<7

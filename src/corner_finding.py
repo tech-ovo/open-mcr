@@ -113,10 +113,19 @@ class SquareMark:
         self.unit_length = math_utils.mean(side_lengths)
 
 
+#: (dx/W, dy/H): how far inside the top-left grid corner the L-mark's origin
+#: sits, as a fraction of the grid's width and height. The stock sheets place
+#: the L-mark's outer vertex on the corner with the mark extending inwards, so
+#: its origin lands half an L-mark inside on both axes.
+DEFAULT_L_MARK_OFFSET = (0.15625 / 7.5, 0.15625 / 10.0)
+
+
 def find_corner_marks(image: np.ndarray,
                       save_path: typing.Optional[pathlib.PurePath] = None,
                       basis_width: float = 49.5,
-                      basis_height: float = 31.75
+                      basis_height: float = 31.75,
+                      l_mark_offset: typing.Tuple[float, float] =
+                      DEFAULT_L_MARK_OFFSET
                       ) -> tuple[geometry_utils.Polygon, geometry_utils.ChangeOfBasisTransformer]:
 
     all_polygons: typing.List[
@@ -249,19 +258,30 @@ def find_corner_marks(image: np.ndarray,
         if not (top_right_square and bottom_left_square and bottom_right_square):
             continue
 
-        # Calculate the stable top-left grid corner by projecting the top-left L-mark
-        # square center (get_origin) using its known PDF offset from the grid origin.
-        # In PDF coordinates:
-        #   C_BL (bottom-left square center) = (0.5, 0.5)
-        #   C_BR (bottom-right square center) = (8.0, 0.5)
-        #   C_TL (L-mark top-left square center) = (0.65625, 10.34375)
-        # We solve for u and v such that C_grid_TL (0.5, 10.5) is C_BL + u*(C_BR - C_BL) + v*(C_TL - C_BL).
-        # This yields:
-        #   u = -4/189 = -0.021164
-        #   v = 64/63 = 1.015873
-        u = -4.0 / 189.0
-        v = 64.0 / 63.0
-        
+        # Recover the top-left grid corner. The other three corners are marked
+        # by squares centred on them, but the L-mark hangs inwards, so the
+        # point we get from it (`get_origin`, the centre of the L's bounding
+        # box) is offset from the corner we actually want.
+        #
+        # Write the wanted corner G in affine coordinates on the triangle
+        # (C_BL, C_BR, C_TL), which survive any perspective-free distortion of
+        # the scan:
+        #
+        #   G = C_BL + u*(C_BR - C_BL) + v*(C_TL - C_BL)
+        #
+        # With the grid W wide and H tall and the L-mark origin sitting
+        # (dx, dy) inside the corner, C_BR - C_BL = (W, 0),
+        # C_TL - C_BL = (dx, dy - H), and G - C_BL = (0, -H). Solving:
+        #
+        #   v = 1 / (1 - dy/H)          u = -v * (dx/W)
+        #
+        # `l_mark_offset` supplies (dx/W, dy/H) so a sheet that places its
+        # L-mark differently only has to say so, rather than needing this
+        # arithmetic redone.
+        offset_x, offset_y = l_mark_offset
+        v = 1.0 / (1.0 - offset_y)
+        u = -v * offset_x
+
         top_left_centroid = l_mark.get_origin()
         bottom_left_centroid = geometry_utils.guess_centroid(bottom_left_square.polygon)
         bottom_right_centroid = geometry_utils.guess_centroid(bottom_right_square.polygon)

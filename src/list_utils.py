@@ -48,11 +48,6 @@ def is_adjacent_indexes(items: tp.List[tp.Any], index_a: int, index_b: int):
         items, index_a) == index_b
 
 
-def unnest(nested: tp.List[tp.List[tp.List[tp.Any]]]):
-    """Flatten a list in the form `[[[a,b]], [[c,d]], [[e,f]]]` to `[[a,b], [c,d], [e,f]]`."""
-    return [e[0] for e in nested]
-
-
 def call_on_some(items: tp.List[tp.Any], indexes: tp.List[int],
                  fn: tp.Callable[[tp.Any], tp.Any]) -> list:
     """Return a copy of the list with the results of `fn` called on the items in
@@ -70,29 +65,7 @@ def prev_index(items: tp.List[tp.Any], index: int) -> int:
     return index - 1 if index - 1 >= 0 else len(items) - 1
 
 
-def continue_index(items: tp.List[tp.Any], index_a: int, index_b: int) -> int:
-    """Get the next index in the direction a nd b are going (if b >= a, then returns
-    the next index, otherwise, returns the previous). """
-    if index_b >= index_a:
-        return next_index(items, index_b)
-    return prev_index(items, index_b)
-
-
 Pair = tp.Tuple[int, int]
-
-
-def arrange_like_rays(pair_a: Pair, pair_b: Pair) -> tuple:
-    """Given two pairs of numbers, arrange them such that the common value in
-    the pairs is the second item in the first pair and the first item in the
-    second, like rays that share a vertex. If the pairs have no numbers in common,
-    nothing will happen. """
-    shared = next((a for a, b in zip(pair_a, pair_b) if a == b), None)
-    if shared is not None:
-        pair_a_ = pair_a if pair_a[1] == shared else tuple(reversed(pair_a))
-        pair_b_ = pair_b if pair_b[0] == shared else tuple(reversed(pair_b))
-        return pair_a_, pair_b_
-    else:
-        return pair_a, pair_b
 
 
 def arrange_index_to_first(items: tp.List[tp.Any], index: int) -> list:

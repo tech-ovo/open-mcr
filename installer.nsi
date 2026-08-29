@@ -1,12 +1,22 @@
 !include "MUI2.nsh"
 
 !define setup "open-mcr_install.exe"
-!define srcdir ".\dist\main"
+
+; PyInstaller 6 puts everything except the executable under _internal, and the
+; build uses --name open-mcr, so the layout is:
+;   dist\open-mcr\open-mcr.exe
+;   dist\open-mcr\_internal\src\assets\icon.ico
+; `File /a /r "${srcdir}"` copies that whole folder into $INSTDIR, which is why
+; the installed paths below all start with ${appdir}.
+!define srcdir ".\dist\open-mcr"
+!define appdir "open-mcr"
 !define company "Ian Sanders"
 !define prodname "OpenMCR"
-!define exec "main\main.exe"
+!define exec "${appdir}\open-mcr.exe"
 
-!define icon "assets\icon.ico"
+!define iconrel "_internal\src\assets\icon.ico"
+!define icon "${srcdir}\${iconrel}"
+!define installedicon "$INSTDIR\${appdir}\${iconrel}"
 
 !define regkey "Software\${prodname}"
 !define uninstkey "Software\Microsoft\Windows\CurrentVersion\Uninstall\${prodname}"
@@ -23,8 +33,8 @@ Name "${prodname}"
 Caption "${prodname} Installer"
 
 !ifdef icon
-  Icon "${srcdir}\${icon}"
-  !define MUI_ICON "${srcdir}\${icon}"
+  Icon "${icon}"
+  !define MUI_ICON "${icon}"
 !endif
 
 OutFile "${setup}"
@@ -79,16 +89,12 @@ Section
   WriteRegStr HKCR "${prodname}\Shell\open\command\" "" '"$INSTDIR\${exec} "%1"'
 
   !ifdef icon
-    WriteRegStr HKCR "${prodname}\DefaultIcon" "" "$INSTDIR\${icon}"
+    WriteRegStr HKCR "${prodname}\DefaultIcon" "" "${installedicon}"
   !endif
 
   SetOutPath $INSTDIR
 
   File /a /r "${srcdir}"
-
-  !ifdef icon
-    File /a "${srcdir}\${icon}"
-  !endif
 
   WriteUninstaller "${uninstaller}"
 SectionEnd
@@ -100,7 +106,7 @@ Section
     CreateDirectory "$SMPROGRAMS\$StartMenuFolder"
     CreateShortcut "$SMPROGRAMS\$StartMenuFolder\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
     !ifdef icon
-      CreateShortCut "$SMPROGRAMS\$StartMenuFolder\${prodname}.lnk" "$INSTDIR\${exec}" "" "$INSTDIR\${icon}"
+      CreateShortCut "$SMPROGRAMS\$StartMenuFolder\${prodname}.lnk" "$INSTDIR\${exec}" "" "${installedicon}"
     !else
       CreateShortCut "$SMPROGRAMS\$StartMenuFolder\${prodname}.lnk" "$INSTDIR\${exec}"
     !endif
@@ -111,7 +117,7 @@ SectionEnd
 UninstallText "This will uninstall ${prodname}."
 
 !ifdef icon
-  UninstallIcon "${srcdir}\${icon}"
+  UninstallIcon "${icon}"
 !endif
 
 Section "Uninstall"
@@ -131,11 +137,9 @@ Section "Uninstall"
     Delete "$INSTDIR\${notefile}"
   !endif
 
-  !ifdef icon
-    Delete "$INSTDIR\${icon}"
-  !endif
-
-  Delete "$INSTDIR"
+  RMDir /r "$INSTDIR\${appdir}"
+  Delete "$INSTDIR\${uninstaller}"
+  RMDir "$INSTDIR"
 
   !ifdef unfiles
     !include "${unfiles}"
