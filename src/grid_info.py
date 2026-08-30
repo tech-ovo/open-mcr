@@ -6,10 +6,6 @@ from . import geometry_utils
 from . import sheet_layout
 Orientation = geometry_utils.Orientation
 
-#: A sheet whose Student ID is all nines is an answer key rather than a
-#: student's paper. The CAJCL sheet uses a 4-digit ID, so that is "9999".
-KEY_STUDENT_ID = sheet_layout.KEY_STUDENT_ID
-
 # Default grid dimensions used by the legacy single-page variants (75q and 150q).
 GRID_HORIZONTAL_CELLS = 36
 GRID_VERTICAL_CELLS = 48
@@ -100,7 +96,6 @@ class FormVariant():
     basis_height: float
     y_shift: float
     output_fields: tp.List[Field]
-    key_student_id: str
     l_mark_offset: tp.Tuple[float, float]
     review_marks_by_default: bool
 
@@ -134,32 +129,19 @@ class FormVariant():
         # Where this sheet's L-mark sits relative to the grid corner; see
         # `corner_finding.DEFAULT_L_MARK_OFFSET`.
         self.l_mark_offset = l_mark_offset
-        # Whether to hold every mark to the legibility bar in `mark_quality`
-        # unless the operator says otherwise. On for the CAJCL sheet, whose
-        # workflow is "when in doubt, grade it by hand"; off for the legacy
-        # sheets, whose scans predate the check and whose behaviour should not
-        # change under it.
+        # Kept for the legacy variants, which the pipeline can still be
+        # pointed at programmatically even though the CLI no longer offers
+        # them.
         self.review_marks_by_default = review_marks_by_default
         # Columns to write to the results CSV. Defaults to every field that
         # exists on the page; variants override it to hide bookkeeping fields
         # (such as the page code) or to fix the column order.
         self.output_fields = (list(output_fields) if output_fields is not None
                               else list(self.fields.keys()))
-        # A sheet whose Student ID is all nines is an answer key. How many
-        # nines depends on how many digit columns the variant prints.
-        student_id = self.fields.get(Field.STUDENT_ID)
-        if isinstance(student_id, list):
-            student_id = student_id[0] if student_id else None
-        self.key_student_id = ("9" * student_id.num_fields
-                               if student_id is not None else KEY_STUDENT_ID)
 
     @property
     def questions(self) -> tp.List[GridGroupInfo]:
         return [q for col in self.question_columns for q in col]
-
-    @property
-    def num_questions(self) -> int:
-        return sum(len(col) for col in self.question_columns)
 
     @property
     def questions_per_column(self) -> int:
@@ -222,13 +204,13 @@ form_150q = FormVariant(
 # ---------------------------------------------------------------------------
 
 
-def _digit_field(first_column: int) -> GridGroupInfo:
+def _digit_field(first_column: int, digits: int) -> GridGroupInfo:
     """A block of digit columns: fields run left to right, bubbles top to
     bottom within each column."""
     return GridGroupInfo(
         first_column,
         sheet_layout.ID_FIRST_BUBBLE_ROW,
-        num_fields=sheet_layout.ID_DIGITS,
+        num_fields=digits,
         fields_type=FieldType.NUMBER,
         field_length=sheet_layout.BUBBLES_PER_DIGIT,
         field_orientation=Orientation.HORIZONTAL,
@@ -302,13 +284,15 @@ form_cajcl_page1 = _cajcl_page(
     0,
     {
         Field.PAGE_CODE: _PAGE_CODE_FIELD,
-        Field.STUDENT_ID: _digit_field(sheet_layout.STUDENT_ID_COLUMN),
+        Field.STUDENT_ID: _digit_field(sheet_layout.STUDENT_ID_COLUMN,
+                                       sheet_layout.STUDENT_ID_DIGITS),
         Field.LATIN_LEVEL: _single_choice_field(
             sheet_layout.LATIN_LEVEL_COLUMN,
             sheet_layout.LATIN_LEVEL_FIRST_ROW,
             len(sheet_layout.LATIN_LEVELS), Orientation.VERTICAL),
         Field.TEST_FORM_CODE: _digit_field(
-            sheet_layout.PAGE_TEST_ID_COLUMNS[0][0]),
+            sheet_layout.PAGE_TEST_ID_COLUMNS[0][0],
+            sheet_layout.TEST_ID_DIGITS),
     },
     CAJCL_OUTPUT_FIELDS,
 )
@@ -319,10 +303,11 @@ form_cajcl_page2 = _cajcl_page(
         Field.PAGE_CODE: _PAGE_CODE_FIELD,
         # Repeated on the back so a page that gets separated from its front
         # can still be identified (and so mis-collated batches are caught).
-        Field.STUDENT_ID: _digit_field(sheet_layout.STUDENT_ID_COLUMN),
+        Field.STUDENT_ID: _digit_field(sheet_layout.STUDENT_ID_COLUMN,
+                                       sheet_layout.STUDENT_ID_DIGITS),
         # One Test ID per answer column on this page.
         Field.TEST_FORM_CODE: [
-            _digit_field(column)
+            _digit_field(column, sheet_layout.TEST_ID_DIGITS)
             for column in sheet_layout.PAGE_TEST_ID_COLUMNS[1]
         ],
     },
@@ -356,21 +341,12 @@ class TwoSidedFormVariant():
         return list(self.page_variants[0].output_fields)
 
     @property
-    def key_student_id(self) -> str:
-        return self.page_variants[0].key_student_id
-
-    @property
     def l_mark_offset(self) -> tp.Tuple[float, float]:
         return self.page_variants[0].l_mark_offset
 
     @property
     def review_marks_by_default(self) -> bool:
         return self.page_variants[0].review_marks_by_default
-
-    @property
-    def tests_per_sheet(self) -> int:
-        return sum(
-            len(v.question_columns) for v in self.page_variants)
 
 
 form_cajcl = TwoSidedFormVariant([form_cajcl_page1, form_cajcl_page2])
@@ -379,14 +355,3 @@ form_cajcl = TwoSidedFormVariant([form_cajcl_page1, form_cajcl_page2])
 #: sheet, so it is carried forward onto the rows produced by the back page.
 CARRY_OVER_FIELDS: tp.Tuple[Field, ...] = (Field.STUDENT_ID,
                                            Field.LATIN_LEVEL)
-
-
-def latin_level_name(raw_value: str) -> str:
-    """Map the bubbled Latin level index onto its printed name."""
-    digits = "".join(ch for ch in raw_value if ch.isdigit())
-    if not digits:
-        return ""
-    index = int(digits)
-    if 0 <= index < len(sheet_layout.LATIN_LEVELS):
-        return sheet_layout.LATIN_LEVELS[index]
-    return ""

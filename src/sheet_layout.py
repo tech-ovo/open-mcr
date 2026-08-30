@@ -73,23 +73,22 @@ BASIS_HEIGHT = GRID_HEIGHT_IN / L_MARK_SIZE_IN       # 32.0
 ID_LABEL_ROW = 5
 #: Row holding the ``0`` bubble; digit ``d`` sits at ``ID_FIRST_BUBBLE_ROW + d``.
 ID_FIRST_BUBBLE_ROW = 6
-#: Digits in the Student ID and in each Test ID.
-ID_DIGITS = 4
+#: Digits in the Student ID.
+STUDENT_ID_DIGITS = 5
+#: Digits in each Test ID.
+TEST_ID_DIGITS = 4
 BUBBLES_PER_DIGIT = 10
 
 #: The Student ID block occupies the same columns and rows on *both* pages so
 #: that a loose back page can still be matched to its front page.
 STUDENT_ID_COLUMN = 6
 
-#: Student ID reserved for answer keys (one per Test ID).
-KEY_STUDENT_ID = "9" * ID_DIGITS
-
 # --- Latin level (front page only) ---------------------------------------
 
 LATIN_LEVEL_COLUMN = 1
 LATIN_LEVEL_FIRST_ROW = ID_FIRST_BUBBLE_ROW
 LATIN_LEVELS: tp.Tuple[str, ...] = ("MS-1", "MS-2", "MS-3", "HS-1", "HS-2",
-                                    "HS-3", "HS-ADV")
+                                    "HS-3", "HS-Adv")
 
 # --- Page code (front/back marker) ---------------------------------------
 

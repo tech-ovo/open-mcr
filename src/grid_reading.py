@@ -14,7 +14,6 @@ from . import alphabet
 from . import geometry_utils
 from . import grid_info
 from . import image_utils
-from . import list_utils
 
 """ This is what determines the circle size of the grid cell mask. If it is 0,
 the circle touches all edges of the grid cell. If it is 0.5, the circle is 50%
@@ -344,24 +343,6 @@ def get_group_from_info(info: grid_info.GridGroupInfo,
                                     info.cell_orientation)
 
 
-def read_answer_column(
-        column_index: int, question_index: int, grid: Grid, threshold: float,
-        form_variant: grid_info.FormVariant,
-        fill_percents: tp.List[tp.List[float]]
-) -> tp.List[tp.Union[tp.List[str], tp.List[int]]]:
-    """Read a question from a specific MCQ column. Used by multi-column
-    variants (two-sided form page 2 has 2 MCQ columns).
-
-    `fill_percents` should be the per-column fill percent list returned by
-    `get_answer_fill_percents_for_column`, i.e. `fill_percents[question_index]`
-    is the list of bubble fill percents for that question.
-    """
-    column = form_variant.question_columns[column_index]
-    return get_group_from_info(column[question_index],
-                               grid).read_value(threshold,
-                                                fill_percents[question_index])
-
-
 def get_answer_fill_percents_for_column(
         column_index: int, grid: Grid,
         form_variant: grid_info.FormVariant
@@ -404,53 +385,3 @@ def get_group_cell_circles(
             field_circles.append((centre.x, centre.y, radius))
         circles.append(field_circles)
     return circles
-
-
-def field_group_to_string(
-        values: tp.List[tp.Union[tp.List[str], tp.List[int]]]):
-    result_strings: tp.List[str] = []
-    for value in values:
-        if len(value) == 0:
-            result_strings.append(' ')
-        elif len(value) == 1:
-            result_strings.append(str(value[0]))
-        else:
-            value_as_strings = [str(el) for el in value]
-            result_strings.append(f'[{"|".join(value_as_strings)}]')
-    return "".join(result_strings).strip()
-
-
-def calculate_bubble_fill_threshold(
-        field_fill_percents: tp.Dict[grid_info.Field, tp.List[tp.List[float]]],
-        answer_fill_percents: tp.List[tp.List[tp.List[float]]],
-        form_variant: grid_info.FormVariant,
-        save_path: tp.Optional[pathlib.PurePath] = None) -> float:
-    """Dynamically calculate the threshold to use for determining if a bubble is
-    filled or unfilled.
-
-    This is a time consuming function so it should only be called once per page.
-    It works by getting the fill percentages of all the values in all the
-    fields, sorting them, and finding the largest increase in fill percent
-    between all the values in the highest 1/4 (assumes all the filled bubbles
-    are less than 1/4 of all the bubbles). It then returns the average of the
-    two values that were subtracted to make the largest increase.
-
-    If `save_path` is provided, saves debugging data to this location as
-    "threshold_values.txt".
-    """
-    fill_percents_lists = list(
-        field_fill_percents.values()) + answer_fill_percents
-    fill_percents = [np.array(l).flatten() for l in fill_percents_lists]
-    sorted_and_flattened = np.sort(np.concatenate(fill_percents))
-    last_chunk = sorted_and_flattened[-round(sorted_and_flattened.size / 5):]
-    differences = [
-        last_chunk[i + 1] - last_chunk[i] for i in range(last_chunk.size - 1)
-    ]
-    biggest_diff_index = list_utils.find_greatest_value_indexes(
-        differences, 1)[0]
-    result = (last_chunk[biggest_diff_index] +
-              last_chunk[biggest_diff_index + 1]) / 2
-    if save_path:
-        with open(str(save_path / "threshold_values.txt"), "w+") as file:
-            file.writelines([str(sorted_and_flattened), "\n\n", str(result)])
-    return result

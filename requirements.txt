@@ -21,8 +21,7 @@ numpy>=2.1,<3
 # NumPy 1.x cannot be run in NumPy 2.x" at import. The wheels are tagged
 # cp37-abi3, so one build serves every interpreter from 3.7 up.
 # This project never calls cv2's HighGUI (no imshow/waitKey), so
-# opencv-python-headless works just as well and makes a smaller PyInstaller
-# bundle if you would rather use it.
+# opencv-python-headless works just as well and is a smaller download.
 opencv-python>=4.11,<6
 
 # Reads scanned PDFs, and rasterises pages one at a time so a large batch does
@@ -39,9 +38,8 @@ reportlab>=4.2,<6
 # with CPython 3.13 wheels.
 Pillow>=10.4,<14
 
-# --- development and packaging -------------------------------------------
-# Not needed to grade exams. Install with `pip install -r requirements.txt`
-# as usual, or skip this file's second half if you only want to run the tool.
+# --- development ---------------------------------------------------------
+# Not needed to grade exams, only to work on the code.
 
 pytest>=8.3,<10
 
@@ -50,8 +48,3 @@ flake8>=7.1,<8
 # 0.40 is the first release to vendor its own copy of lib2to3, which Python
 # 3.13 dropped from the standard library. 0.40.0 and 0.40.1 are yanked on PyPI.
 yapf>=0.40.2,<1
-
-# 6.11 is the first release supporting CPython 3.13. PyInstaller 6 moved
-# everything except the executable into an `_internal` folder - see
-# build_instructions.md, which has been updated to match.
-pyinstaller>=6.11,<7

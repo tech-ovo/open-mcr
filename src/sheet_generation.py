@@ -225,9 +225,10 @@ def _footer(c: pdfcanvas.Canvas, page_index: int):
 # --- blocks --------------------------------------------------------------
 
 
-def _digit_block(c: pdfcanvas.Canvas, first_column: int, caption: str):
+def _digit_block(c: pdfcanvas.Canvas, first_column: int, caption: str,
+                 digits: int):
     _caption(c, first_column, layout.ID_LABEL_ROW, caption)
-    for digit_index in range(layout.ID_DIGITS):
+    for digit_index in range(digits):
         column = first_column + digit_index
         for digit in range(layout.BUBBLES_PER_DIGIT):
             row = layout.ID_FIRST_BUBBLE_ROW + digit
@@ -309,7 +310,8 @@ def _answer_block(c: pdfcanvas.Canvas, first_column: int, first_question: int):
 def _test_block(c: pdfcanvas.Canvas, page_index: int, test_on_page: int,
                 test_number: int):
     id_column = layout.PAGE_TEST_ID_COLUMNS[page_index][test_on_page]
-    _digit_block(c, id_column, f"Test {test_number} ID")
+    _digit_block(c, id_column, f"Test {test_number} ID",
+                 layout.TEST_ID_DIGITS)
     for subcolumn_index, column in enumerate(
             layout.PAGE_SUBCOLUMNS[page_index][test_on_page]):
         _answer_block(c, column,
@@ -325,7 +327,8 @@ def draw_page(c: pdfcanvas.Canvas, page_index: int):
     _header(c)
     _page_code(c, page_index)
 
-    _digit_block(c, layout.STUDENT_ID_COLUMN, "Student ID")
+    _digit_block(c, layout.STUDENT_ID_COLUMN, "Student ID",
+                 layout.STUDENT_ID_DIGITS)
 
     if page_index == 0:
         _latin_level_block(c)

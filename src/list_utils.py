@@ -6,13 +6,6 @@ import typing as tp
 T = tp.TypeVar('T')
 
 
-def find_index(items: tp.List[T], value: T) -> int:
-    if isinstance(value, str):
-        return next(i for i, x in enumerate(items)
-                    if x.strip() == value.strip())
-    return next(i for i, x in enumerate(items) if x == value)
-
-
 def find_greatest_value_indexes(values: tp.List[float],
                                 n: int) -> tp.List[int]:
     """Find the indices of the greatest `n` numbers in `items`.
@@ -85,26 +78,3 @@ def determine_which_is_next(items: tp.List[tp.Any], index_a: int,
     if next_index(items, index_a) == index_b:
         return index_b
     return index_a
-
-
-def strip_all(items: tp.List[str]) -> tp.List[str]:
-    return [item.strip() for item in items]
-
-
-def remove_index(items: tp.List[T], index: int) -> tp.List[T]:
-    """Returns items, but without the item at the index. Doesn't mutate items."""
-    return [item for i, item in enumerate(items) if i != index]
-
-
-def transpose(matrix: tp.List[tp.List[T]]) -> tp.List[tp.List[T]]:
-    """Given a 2D list, transposes and returns it without mutating the original."""
-    if (len(set([len(row) for row in matrix])) != 1):
-        raise ValueError(
-            "Input matrix rows must all have the same length for transposing.")
-    return [[row[col_index] for row in matrix]
-            for col_index in range(len(matrix[0]))]
-
-
-def count_trailing_empty_elements(items: tp.List[tp.Any]) -> int:
-    """Returns the number of trailing empty elements in the list."""
-    return next((i for i, x in enumerate(reversed(items)) if x != ""), len(items))

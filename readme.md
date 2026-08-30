@@ -4,14 +4,10 @@
 
 ### CAJCL State Convention edition
 
-[![Continuous Integration](https://github.com/iansan5653/open-mcr/actions/workflows/continuous_integration.yml/badge.svg)](https://github.com/iansan5653/open-mcr/actions/workflows/continuous_integration.yml)
-
 > **Warning**
-> As per the license of this software, no warranty is implied. The software is
-> stable but there still may be bugs. Given that students' grades are at stake,
-> please be sure to audit the results — particularly when working with
-> low-quality scans. The `--annotate` option described below exists to make
-> that audit quick.
+> As per the license of this software, no warranty is implied. Given that
+> students' grades are at stake, please audit the results — particularly with
+> low-quality scans. The `--annotate` option exists to make that audit quick.
 
 This is a fork of [OpenMCR](https://github.com/iansan5653/open-mcr), customised
 for the **California Junior Classical League State Convention**, where each
@@ -24,10 +20,11 @@ answer sheet.
 
 - [What this fork adds](#what-this-fork-adds)
 - [The CAJCL answer sheet](#the-cajcl-answer-sheet)
+- [Answer keys](#answer-keys)
 - [Installing](#installing)
 - [**Grading from the command line, step by step**](#grading-from-the-command-line-step-by-step)
+- [Thresholds](#thresholds)
 - [Command reference](#command-reference)
-- [Using the graphical interface instead](#using-the-graphical-interface-instead)
 - [How the pieces fit together](#how-the-pieces-fit-together)
 - [Background and license](#background-and-license)
 
@@ -37,17 +34,20 @@ answer sheet.
 
 | | |
 |---|---|
-| **A two-page CAJCL sheet** | Three 80-question tests (240 questions) on one double-sided sheet, set in Times to suit the classical theme, with the CAJCL emblem printed in grayscale at the foot of the front page. |
-| **Four-digit Student ID** | Bubbled in the same four columns on **both** sides, so a back page that gets separated can still be matched to its front. |
-| **Latin level as bubbles** | Seven options — MS-1, MS-2, MS-3, HS-1, HS-2, HS-3, HS-ADV — replacing the old write-in blank. |
-| **Directions on the sheet** | Printed on the front page, so students do not need a separate instruction sheet. |
-| **Front/back markers** | Each page carries a printed **page-code bubble** (machine-readable) and a **solid collation bar** along the bottom — left on the front, right on the back — so a printed stack can be checked by riffling it. |
-| **Batch splitting** | Scan ten students as one twenty-page PDF; the reader splits it into ten sheets automatically. |
-| **Page-order enforcement** | If the pages are not a clean sequence of front-then-back pairs, the run stops and says exactly which page is wrong. |
-| **Unclear-mark detection** | Any mark too faint, too partly erased, or too doubled to call is reported in `review_required.csv` and the run exits non-zero, so those sheets can be graded by hand. |
-| **Marked-up PDFs** | `--annotate` writes a copy of every scan with the correct answer ringed in green and any wrong choice in red. |
-
-The legacy 75- and 150-question sheets still work exactly as before.
+| **A two-page CAJCL sheet** | Three 80-question tests (240 questions) on one double-sided sheet, set in Times, with the CAJCL emblem in grayscale at the foot of the front page. |
+| **Five-digit Student ID** | Bubbled in the same five columns on **both** sides, so a back page that gets separated can still be matched to its front. |
+| **Latin level as bubbles** | MS-1, MS-2, MS-3, HS-1, HS-2, HS-3, HS-Adv. |
+| **Directions on the sheet** | Printed on the front page. |
+| **Front/back markers** | A machine-readable page-code bubble and a solid collation bar along the bottom - left on the front, right on the back. |
+| **Batch folders** | `--batch 3` reads `<input>/Batch 3` and writes `<output>/Batch 3`, and names the review sheets after the batch. |
+| **Batch splitting** | Scan ten students as one twenty-page PDF; it is split into ten sheets automatically, and mis-collated pages stop the run. |
+| **Calibrated thresholds** | The filled/blank cutoff is measured from the scans themselves, once per PDF, so a different scanner needs no retuning. Printed to `Calibration.txt` and overridable with `--threshold`. |
+| **A plain cutoff, so `AB` is readable** | A bubble is filled when it is dark enough - never "the darkest of the five" - so a student who means A *and* B is read as `AB`. |
+| **Answer keys as a CSV** | One row per test, with a Test ID, the Latin levels excluded from it, and 80 answers. A cell may list alternatives (`ABD`). |
+| **Review as a spreadsheet** | Anything too faint to call goes to `Unclear.csv` with a checkbox per option; anything required but blank goes to `Missing.csv`. Correct them in Google Sheets and feed them back. |
+| **Regrade without rescanning** | `--regrade` re-scores an existing `Results.csv` against a corrected key or corrected review sheets. |
+| **Question statistics** | `Question Stats.csv` gives per-question counts and percent correct. |
+| **Marked-up PDFs** | `--annotate` rings every bubble the reader acted on, answers and metadata alike. |
 
 ---
 
@@ -55,26 +55,20 @@ The legacy 75- and 150-question sheets still work exactly as before.
 
 Print it from **[`src/assets/cajcl_answer_sheet.pdf`](src/assets/cajcl_answer_sheet.pdf)**, double-sided, at **100% scale**.
 
-"Fit to page" also works — the reader locates the four corner marks and builds
-its grid from them, so a uniformly scaled page reads correctly (verified down
-to 85%). 100% is still preferable, because scaling shrinks the bubbles and
-throws away margin you may want on a poor scan. What does matter is that the
-scaling be *uniform*: never print two pages up, and leave "auto-rotate" off.
-
 **Front page (page 1 of 2)**
 
 ```
         CALIFORNIA JUNIOR CLASSICAL LEAGUE
                   PAGE ( 1 ) ( 2 )      <- page-code bubbles, "1" printed solid
 
-  LATIN LEVEL        STUDENT ID              TEST 1 ID
-   o MS-1            0 0 0 0                 0 0 0 0
-   o MS-2            1 1 1 1                 1 1 1 1
+  LATIN LEVEL         STUDENT ID             TEST 1 ID
+   o MS-1            0 0 0 0 0               0 0 0 0
+   o MS-2            1 1 1 1 1               1 1 1 1
    o MS-3              ...                     ...
    o HS-1
    o HS-2                                    1  A B C D E   41  A B C D E
    o HS-3                                    2  A B C D E   42  A B C D E
-   o HS-ADV                                     ...             ...
+   o HS-Adv                                     ...             ...
                                             40  A B C D E   80  A B C D E
   First Name  ______________
   Last Name   ______________
@@ -91,14 +85,7 @@ scaling be *uniform*: never print two pages up, and leave "auto-rotate" off.
   corner mark
 ```
 
-**Back page (page 2 of 2)** carries `TEST 2 ID`, the **same** `STUDENT ID` block in the same place, `TEST 3 ID`, and the answer columns for tests 2 and 3. Its collation bar is on the **right**.
-
-Nothing on the sheet is printed closer to a paper edge than the corner marks
-are (0.42in). Those marks are the one thing that absolutely must come out of
-the printer, so they set the sheet's real margin requirement. The footer and
-the collation bar sit on the same line as the two bottom marks, their bottoms
-flush with them, and the title is well inside the top pair. A printer that can
-render the marks can render the whole sheet.
+**Back page (page 2 of 2)** carries `TEST 2 ID`, the **same** `STUDENT ID` block in the same place, `TEST 3 ID`, and the answer columns for tests 2 and 3.
 
 To regenerate the PDF after changing the layout:
 
@@ -108,11 +95,58 @@ python -m src.sheet_generation src/assets/cajcl_answer_sheet.pdf
 
 ### Answer keys
 
-An answer key is just a normal sheet with **Student ID `9999`** bubbled in. Fill in each Test ID and the correct answers for all three tests. One key sheet produces three keys, one per Test ID. Leave the Latin level blank on a key.
+Keys live in a CSV that convention staff maintain by hand - there is no longer
+a special "all nines" key sheet to scan. Start from the template:
 
-Students are matched to keys by **Test ID**, so the Test ID a student bubbles must match the one on the key.
+```sh
+python -m src.main --key-template "Keys.csv"
+```
 
----
+The file runs **down** the page: the first column names the field, and each
+further column is one test. With eighty questions that is far easier to edit
+than eighty columns across.
+
+```csv
+Name,Latin Literature,Reading Comprehension 1,Mythology
+Test ID,1001,1002,1003
+Excluded,,HS-Adv,"MS-1, MS-2"
+1,A,D,B
+2,C,A,B
+...
+80,E,B,C
+```
+
+| Row | Meaning |
+|---|---|
+| `Name` | What the test is called, for the reports. Free text. |
+| `Test ID` | The 4-digit number students bubble. **Must be unique.** |
+| `Excluded` | Latin levels that may not sit this test, comma-separated. Blank if everyone may. |
+| `1` ... `80` | The correct answer to each question. |
+
+An answer cell says what a **correct sheet looks like**:
+
+| Cell | Means |
+|---|---|
+| `B` | The student filled B and nothing else. |
+| `ABD` | The student filled **all three** of A, B and D. |
+| `A|BD` | **Either** is accepted: A alone, or B and D together. |
+| *(blank)* | The question is not scored at all. |
+
+So several letters together are one answer requiring all of them, and `|`
+separates alternatives. Use a blank cell to retire a faulty question without
+renumbering anything.
+
+Two things about a key are *breaking* - they stop the run before anything is
+written, because grading would otherwise be meaningless:
+
+- two columns sharing a Test ID;
+- an answer letter outside A-E, a stray `|`, or an unrecognised Latin level.
+
+Two things are **not** breaking, and are recorded per row in `Results.csv`
+instead:
+
+- `TEST NOT FOUND` - the student bubbled a Test ID that is not in the key;
+- `TEST NOT ALLOWED` - the student's Latin level is excluded from that test.
 
 ## Installing
 
@@ -133,7 +167,7 @@ If that errors or prints something older, install Python from
 ### Windows (PowerShell)
 
 ```powershell
-cd $HOME\OneDrive\Desktop\open-mcr
+cd C:\dev\open-mcr
 py -3.13 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -165,13 +199,11 @@ A few things that sometimes trip people up:
   `Activate.ps1`, so you may never see this. In `cmd.exe`, use
   `.venv\Scripts\activate.bat` instead.
 
-- **A virtual environment inside OneDrive gets synced.** `.venv` is several
-  hundred megabytes of binaries that OneDrive has no reason to back up, and
-  sync can hold a file open while pip is trying to write it. `.gitignore`
-  covers `.venv` for Git, but OneDrive does not read `.gitignore`. If you hit
-  slow installs or permission errors, exclude the folder in OneDrive's settings
-  (*Settings → Sync and backup → Advanced settings → Excluded folders*), or
-  keep the checkout somewhere outside OneDrive such as `C:\dev\open-mcr`.
+- **Keep the checkout out of a synced folder.** A `.venv` is several hundred
+  megabytes of binaries, and OneDrive, Dropbox or iCloud will happily sync all
+  of it and hold files open while pip is writing them. `.gitignore` covers
+  `.venv` for Git, but a sync client does not read `.gitignore`. Somewhere
+  like `C:\dev\open-mcr` avoids the whole question.
 
 ### macOS and Linux
 
@@ -190,9 +222,7 @@ extract it, and `cd` into the extracted folder instead.
 > **Linux**: if you see errors about `opencv` or `tkinter`, run
 > `sudo apt-get install python3-tk libgl1 libglib2.0-0` and try again.
 >
-> **macOS**: if the graphical interface shows a black screen, reinstall Python
-> with Tkinter — the easiest route is Homebrew,
-> [as described here](https://apple.stackexchange.com/a/315121).
+> **macOS**: nothing extra is needed; the tool is command-line only.
 
 ### A note on `python -m`
 
@@ -220,201 +250,236 @@ Confirm you are in the right place — this should list `src`, `test`, and `read
 ls          # Windows: dir
 ```
 
-### Step 2 — Make two folders
+### Step 2 — Lay out the folders
 
-You need one folder holding the scans and one for the results. They must be *different* folders. For example, on your Desktop:
+Everything is organised by **batch**. A batch is one stack of sheets you
+scanned together; giving each one a number keeps its scans, its results and
+its review sheets apart from every other batch's.
 
-```sh
-mkdir "C:\Users\you\Desktop\convention\scans"
-mkdir "C:\Users\you\Desktop\convention\results"
+```
+Grading/
+  Scans/
+    Batch 1/            <- the PDFs from the scanner
+      batch.pdf
+    Batch 2/
+      morning.pdf
+      afternoon.pdf
+  Results/              <- created for you
+  Keys.csv              <- the answer key; NOT inside a batch folder
 ```
 
-On macOS or Linux:
-
-```sh
-mkdir -p ~/Desktop/convention/scans ~/Desktop/convention/results
-```
+The key sits outside the batch folders because one key serves every batch.
 
 ### Step 3 — Scan the sheets
 
-Scan **every sheet double-sided**, so each student produces two pages, **front page first**. Almost any scanner will do; these settings work well:
+Scan **every sheet double-sided**, so each student produces two pages, **front
+page first**. Settings that work well:
 
 - **Colour**: black and white, or grayscale. Colour also works.
 - **Resolution**: 200–300 dpi. Higher is slower with no benefit.
-- **Output**: one PDF for the whole batch is easiest — ten students becomes one twenty-page PDF.
-- **Turn off** "auto-rotate", "deskew", "auto-crop", and "blank page removal". Blank page removal in particular will silently drop a lightly-marked page and throw the whole batch out of order.
+- **Output**: one PDF per batch is easiest — ten students becomes one
+  twenty-page PDF.
+- **Turn off** "auto-rotate", "deskew", "auto-crop" and "blank page removal".
+  Blank page removal in particular will silently drop a lightly-marked page
+  and throw the whole batch out of order.
 
-Put the answer key sheet in the same batch as the students; the software recognises it by its `9999` Student ID.
-
-Save the resulting file(s) into your `scans` folder. The software reads `.pdf`, `.png`, `.jpg`, `.jpeg`, `.bmp`, `.tif`, and `.tiff`. You may put several files in the folder — they are read in filename order, and each file must contain whole sheets (an even number of pages).
+Put the resulting file(s) in `Scans/Batch 1`. Several files per batch is fine;
+they are read in filename order, and each must hold whole sheets.
 
 ### Step 4 — Run the grader
 
-The command has this shape:
-
-```
-python -m src.main  <scans folder>  <results folder>  --variant cajcl
-```
-
-Filled in with the folders from Step 2 (all on one line):
-
 ```sh
-python -m src.main "C:\Users\you\Desktop\convention\scans" "C:\Users\you\Desktop\convention\results" --variant cajcl
+python -m src.main "Grading/Scans" "Grading/Results" --batch 1 --key "Grading/Keys.csv" --annotate
 ```
 
-Note the details:
+- `python -m src.main` — **not** `python src/main.py`.
+- `--batch 1` reads `Grading/Scans/Batch 1` and writes
+  `Grading/Results/Batch 1`.
+- `--key` is optional. Without it the sheets are read but not scored.
+- `--annotate` is optional and roughly doubles the run time.
 
-- `python -m src.main` — **not** `python src/main.py`. The `-m` form is required; the other one fails with an import error.
-- `--variant cajcl` — **required** for the CAJCL sheet. Without it the software assumes the legacy 75-question sheet and reads nothing but nonsense.
-- Quote any path containing a space.
-
-While it runs you will see one line per page:
+What you will see:
 
 ```
-Found 10 sheet(s) across 20 page(s).
-Processing 'batch.pdf (page 1)'.
-Processing 'batch.pdf (page 2)'.
-...
-OK: all exams processed and saved.
-OK: all keys processed and saved.
-OK: all scored results processed and saved.
+Found 1 file: 'batch.pdf'.
+  ████████████████████████ 20/20  Processing 'batch.pdf'.
+  ████████████████████████ 20/20  Annotating 'batch.pdf'.
+Automatic thresholding used.
+  Calibrated thresholds saved to Grading/Results/Batch 1/Calibration.txt.
+All exams processed and saved to Grading/Results/Batch 1.
+  1 marked-up PDF saved to 'Annotated'.
+6 marks need manual review. See 'Batch 1 — Unclear.csv' and 'Batch 1 — Missing.csv'.
+  Regrade with overrides via: python -m src.main --regrade "..." --overrides "..." --key "..."
 ```
 
-A twenty-page batch takes a few seconds.
+It is deliberately quiet. A faint mark or an unknown Test ID is recorded in
+the output files, not printed. Only a **breaking** problem — one that means no
+output should be produced at all — interrupts, and then nothing is written:
+
+- the key file has two tests with the same Test ID, or a bad answer letter;
+- the batch is not a clean run of front/back pairs;
+- a page's corner marks could not be found at all;
+- `--threshold` could not be understood.
 
 ### Step 5 — Read the results
 
-Your results folder now holds CSV files, each named with the date and time it was produced (`2027-04-11_09-30-00__results.csv`). Open them in Excel, Numbers, or any text editor.
+`Grading/Results/Batch 1` now holds:
 
-**`results.csv`** — what each student marked. **Three rows per student**, one per test:
+**`Results.csv`** — three rows per student, one per test:
 
-| Student ID | Latin Level | Test Form Code | Source File | Q1 | Q2 | … |
-|---|---|---|---|---|---|---|
-| 0427 | HS-2 | 1001 | batch.pdf (page 1) | A | B | … |
-| 0427 | HS-2 | 1002 | batch.pdf (page 2) (column 1) | C | C | … |
-| 0427 | HS-2 | 1003 | batch.pdf (page 2) (column 2) | E | A | … |
+| Batch | File | Page | Student ID | Latin Level | Test ID | Test Name | Status | Points | Out Of | Score (%) | 1 | 2 | … |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | batch.pdf | 1 | 04275 | HS-2 | 1001 | Latin Literature | | 78 | 80 | 97.50 | A | B | … |
+| 1 | batch.pdf | 2 | 04275 | HS-2 | 1002 | Reading Comp 1 | TEST NOT ALLOWED | | | | D | AB | … |
 
-- **Test Form Code** is the Test ID the student bubbled.
-- A blank cell means the question was left unanswered.
-- `[A|B]` means two bubbles were filled (use `--multiple` to record that as `F` instead).
-- A `?` inside a Student ID or Test ID — like `04?7` — marks a digit column the reader could not make out. It is deliberately *not* silently dropped, because `047` would look like a valid but wrong ID.
+- An answer cell holds the letters the student filled — `AB` if they filled
+  two, empty if they filled none.
+- A `?` inside a Student ID or Test ID marks a digit column that could not be
+  read. It is deliberately not guessed at, because `0427` would look like a
+  valid but wrong ID.
+- `Status` is blank when all is well, or `NEEDS REVIEW`, `TEST NOT FOUND`, or
+  `TEST NOT ALLOWED`.
 
-**`keys.csv`** — the answer keys that were found, one row per Test ID.
+**`Question Stats.csv`** — per question: how many answered it, how many left
+it blank, how many chose each option, and the percent correct.
 
-**`scores.csv`** — the same three rows per student, with `Total Score (%)` and `Total Points`, and a `1` or `0` per question. If a student's Test ID does not match any key, the score reads `NO KEY FOUND`.
+**`Calibration.txt`** — the cutoffs used, and the `--threshold` line to reuse
+them.
 
-**`review_required.csv`** — only written when something needs a human. See Step 6.
+**`Batch 1 — Unclear.csv`** and **`Batch 1 — Missing.csv`** — only when
+something needs a person. See the next step.
 
-**`rejected_files.csv`** — only written if a page could not be read at all (corner marks not found: a badly skewed, cropped, or blank scan). Re-scan those pages.
+**`Annotated/`** — with `--annotate`, a copy of every scan with every bubble
+the reader acted on ringed: green for the key's answer, red for a wrong
+choice, blue for a mark read with no key to judge it. Anything sent to review
+has its **question number** ringed in amber rather than its five options,
+which would say nothing about which bubble is the problem. The ID, Latin level
+and Test ID bubbles are ringed too, so the whole reading is visible at a
+glance.
 
-### Step 6 — Deal with anything the software refuses to guess at
+### Step 6 — Correct anything the software would not guess at
 
-The command tells you how it went through its **exit code** as well as its output. To see the exit code:
+Two things go to review, and only two:
+
+- **Unclear** — a bubble dark enough to be a real attempt but too light to
+  count. Neither selected nor ignored; a person decides.
+- **Missing** — a *required* field that could not be read: the Student ID,
+  the Latin level, a Test ID. **A blank question is not an error** — that is
+  the student's choice, and it is simply recorded as blank.
+
+`Batch 1 — Unclear.csv` has one row per unclear mark and a column per
+option, with the machine's reading pre-ticked:
+
+```csv
+Batch,File,Page,Student ID,Test ID,Question,A,B,C,D,E,Done
+1,batch.pdf,3,00031,1001,7,FALSE,TRUE,FALSE,FALSE,FALSE,FALSE
+```
+
+`Batch 1 — Missing.csv` asks for a whole field, not one bubble. Type the
+complete value into `Value`. A field that failed on both sides of a sheet is
+**one** row, with `Page` reading `1,2`:
+
+```csv
+Batch,File,Page,Student ID,Field,Value,Done
+1,batch.pdf,"1,2",,Student ID,,FALSE
+1,batch.pdf,1,04275,Latin level,,FALSE
+1,batch.pdf,2,04275,Test 3 ID,,FALSE
+```
+
+**Every row must have `Done` ticked** before it is accepted. An unticked row
+means nobody has looked at it, and quietly folding in the machine's own guess
+would defeat the point of asking — so the run stops and names the rows.
+
+#### Working on it in Google Sheets
+
+A plain CSV has no checkboxes, so this repository ships an Apps Script that
+adds them on import: **[`tools/review_sheet.gs`](tools/review_sheet.gs)**.
+
+1. Make a Google Sheet you will reuse for every batch.
+2. **Extensions → Apps Script**, paste in `tools/review_sheet.gs`, Save.
+3. Click the **Triggers** (clock) icon → **Add Trigger**:
+   function `onSpreadsheetChange`, source *From spreadsheet*, type *On change*.
+   Save and accept the authorisation prompt.
+4. **File → Import → Insert new sheet(s)** and pick a review CSV. It must
+   create a **new sheet** — "Replace current sheet" does not fire the trigger.
+
+The script then turns the option columns into real checkboxes, restores the
+leading zeros that a CSV import strips from IDs, fits every column to its
+contents, sets the whole sheet in Inconsolata, deletes the thousand empty
+padding rows the import leaves behind, freezes the header, offers a dropdown
+of Latin levels on the Missing sheet, and greys out each row as `Done` is
+ticked. If a sheet is ever missed, use **CAJCL → Tidy this review sheet**.
+
+Several people can work in the sheet at once. When it is finished,
+**File → Download → Comma-separated values** for each sheet.
+
+#### Feeding the corrections back
 
 ```sh
-echo %ERRORLEVEL%        # Windows cmd
-echo $LASTEXITCODE       # Windows PowerShell
-echo $?                  # macOS / Linux
+python -m src.main --regrade "Grading/Results/Batch 1/Results.csv" --overrides "Grading/Results/Batch 1" --key "Grading/Keys.csv"
 ```
 
-| Code | Meaning | What to do |
-|---|---|---|
-| `0` | Everything read and scored. | Nothing. |
-| `1` | Bad arguments, or the input folder is empty or missing. | Re-check the command and the folder paths. |
-| `2` | Read and scored, **but some marks were too unclear to grade**. | See below. |
-| `3` | The batch is not a clean sequence of front/back pairs. **Nothing was graded.** | See below. |
+`--overrides` takes a **folder** as well as individual files, and finds the
+review sheets in it. That is what the printed command uses, because the sheet
+names contain an em dash that a legacy Windows console cannot print — a
+copied path would otherwise arrive broken.
 
-#### Exit code 2 — unclear marks
+This re-scores from the saved results — **no image processing**, so it takes a
+moment rather than minutes. The run prints the exact command for you, ready to
+paste.
 
-The run finishes and writes all the normal output, then reports:
+Rows are matched on file, page and question, never on the Student ID, because
+a spreadsheet will silently turn `04275` into `4275`.
 
-```
-ATTENTION: 3 mark(s) were too unclear to grade automatically. See 'review_required.csv'.
-3 mark(s) need to be checked by hand:
-  batch.pdf (page 3) | Q17 (Test ID 1001) | too faint or too partly erased to call filled or blank | B only partly filled; B=46% A=2% C=1% of a normal mark
-  ...
-Error: 3 mark(s) on 2 page(s) are too unclear to grade automatically and must be checked by hand.
-```
+### Step 7 — Regrading after a key change
 
-`review_required.csv` lists each one with its source page, Student ID, location, problem, and the measurement behind the verdict. The percentages are **relative to a normal mark on the same page** — so `B=46%` means that bubble is about half as dark as that student's other answers. This is what a half-erased answer looks like.
-
-Three kinds are reported:
-
-- **borderline** — too faint or too partly erased to call.
-- **multiple** — two or more bubbles filled on one question, or two similarly dark bubbles in an ID column.
-- **blank** — a required field (Student ID, Latin level) has nothing filled.
-
-Pull those sheets, read them yourself, and correct the CSV by hand. When you have satisfied yourself that the readings are right, re-run with `--allow-unclear` to get a clean exit while still producing the report:
+The same command handles a corrected key. If a question turns out to be
+faulty, edit `Keys.csv` — widen the cell to `ABD` to accept alternatives, or
+blank it to stop scoring that question — and run:
 
 ```sh
-python -m src.main <scans> <results> --variant cajcl --allow-unclear
+python -m src.main --regrade "Grading/Results/Batch 1/Results.csv" --key "Grading/Keys.csv"
 ```
 
-If the check is too eager or too lax for your scanner, tune it — `--answer-margin 0.20` reports fewer, `--answer-margin 0.40` reports more.
+Nothing is re-read from the scans, so this is safe to repeat as often as you
+like.
 
-#### Exit code 3 — pages out of order
+### Thresholds
 
-```
-Error: 'batch.pdf (page 7)' is the back page of a sheet, but it was scanned
-where the front page of sheet 4 should be. The pages are out of order: every
-front page must be immediately followed by its own back page.
-```
+By default the filled/blank cutoff is measured from the scans themselves, once
+per PDF, using Otsu's method applied to the *bubble darknesses* rather than to
+the image's pixels. Two adjustments make that work here:
 
-or
+- Only a fraction of bubbles are filled, and textbook Otsu's class-size
+  weighting drags the cutoff down into the blank cluster when the split is
+  that lopsided. A Fisher-style ratio is maximised instead, which has no such
+  weighting. On a test sheet, textbook Otsu put the cutoff at 0.12 with almost
+  no headroom above the blanks; this puts it at 0.35, in the middle of the gap.
+- Answer bubbles and metadata bubbles are calibrated separately.
 
-```
-Error: 'batch.pdf (page 8)' has Student ID 0031, but the front page of sheet 4
-has Student ID 0427. The pages are out of order or two students' sheets have
-been interleaved.
-```
-
-or
+`Calibration.txt` prints the numbers and the line to reuse them:
 
 ```
-Error: The batch has 19 page(s), which is not a whole number of 2-page sheets.
+--threshold 0.3529,0.1943,0.3611,0.2058
 ```
 
-Nothing is graded, because a mis-collated batch would attribute one student's answers to another. Re-order or re-scan the pages named and run again. The collation bar along the bottom — left on fronts, right on backs — makes it quick to spot the offender in a printed stack.
+The four numbers are *answer cutoff, answer review threshold, metadata cutoff,
+metadata review threshold*. A bubble above the cutoff is filled; one between
+the review threshold and the cutoff goes to `Unclear.csv`.
 
-### Step 7 — Check the grading by eye
+Every number is **darkness**, from 0 (untouched white paper) to 1 (solid
+black). So a **higher number is stricter**: it demands a darker mark before
+the bubble counts. Lowering a cutoff makes the reader more willing to call a
+faint mark an answer.
 
-Add `--annotate`:
+You do not have to give all four. Anything left out is calibrated as usual:
 
 ```sh
-python -m src.main <scans> <results> --variant cajcl --annotate
-```
-
-This writes an `annotated/` folder holding a marked-up copy of each input file (`batch_annotated.pdf`). Every page is the original scan with:
-
-- **green** on the bubble the key says is correct,
-- **red** on a bubble the student filled that is not the correct one,
-- **amber** on anything listed in `review_required.csv`,
-- a colour key and the page's Student ID printed along the bottom.
-
-Flipping through it is the fastest way to confirm the software read what you read, and it makes a good demonstration. It roughly doubles the run time and produces a large PDF, so it is off by default.
-
-### A complete worked example
-
-```sh
-# grade the batch, writing predictable file names and a marked-up copy
-python -m src.main ~/Desktop/convention/scans ~/Desktop/convention/results \
-    --variant cajcl \
-    --annotate \
-    --disable-timestamps \
-    --sort
-
-# check how it went
-echo $?
-```
-
-Afterwards, `~/Desktop/convention/results` contains:
-
-```
-results.csv
-keys.csv
-scores.csv
-review_required.csv          (only if something needs a human)
-annotated/batch_annotated.pdf
+--threshold 0.42               # both cutoffs; review thresholds calibrated
+--threshold 0.42,0.36          # the two cutoffs
+--threshold 0.42,0.19,,        # answer thresholds only; metadata calibrated
+--threshold answer=0.42        # the same, by name
+--threshold metadata-review=0.05,answer=0.42
 ```
 
 ---
@@ -423,36 +488,23 @@ annotated/batch_annotated.pdf
 
 ```
 python -m src.main <input_folder> <output_folder> [options]
+python -m src.main --regrade <Results.csv> [--overrides ...] [--key ...]
+python -m src.main --key-template <Keys.csv>
 ```
 
 | Option | Effect |
 |---|---|
-| `--variant {cajcl,75,150}` | Which sheet was used. **`cajcl`** is the two-page State Convention sheet. Defaults to `75` (the legacy sheet), so pass it explicitly. |
-| `--annotate` | Also write marked-up copies of every scan into `annotated/`. |
-| `--allow-unclear` | Still write `review_required.csv`, but exit `0` instead of `2`. |
-| `--check-marks` / `--no-mark-review` | Force the unclear-mark check on or off. It is on by default for `cajcl` and off for the legacy variants, whose archival scans predate it. |
-| `--answer-margin FRACTION` | How wide the "cannot call it" band is, as a fraction either side of halfway between a blank bubble and a real mark. Default `0.3`, i.e. anything 20–80% as dark as a normal mark. |
-| `--id-contrast FRACTION` | How far the darkest bubble of an ID column must stand clear of the next darkest. Default `0.35`. |
-| `--anskeys FILE.csv` | Use a CSV of answer keys instead of reading keys from the scans. |
-| `--formmap FILE.csv` | A form arrangement map, for exams that differ only in question order. Only one key may be supplied with it. |
-| `-ml`, `--multiple` | Record a double-marked question as `F` rather than `[A\|B]`. |
-| `-e`, `--empty` | Record an unanswered question as `G` rather than an empty cell. |
-| `-s`, `--sort` | Sort the output by student name (falls back to Test ID on sheets without name bubbles). |
-| `--mcta` | Also write files for Multiple Choice Test Analysis. |
-| `--disable-timestamps` | Leave the date and time out of output file names. **Existing files are overwritten without warning.** |
-| `-d`, `--debug` | Write a `debug/` folder with the intermediate images for every page. Large, but invaluable when a sheet will not read. |
+| `--batch N` | Read `<input>/Batch N`, write `<output>/Batch N`, and name the review sheets after the batch. |
+| `--key FILE.csv` | Score against this key. Without it, sheets are read but not scored. |
+| `--overrides FILE.csv ...` | Corrected review sheets to fold in before scoring. A folder may be given instead, and the sheets in it are found. |
+| `--regrade Results.csv` | Re-score an existing results file without touching the scans. |
+| `--threshold SPEC` | Use these cutoffs instead of calibrating. Four numbers, two, one, blanks for "calibrate this one", or names such as `answer=0.42`. |
+| `--annotate` | Also write marked-up copies of every scan. |
+| `--key-template FILE.csv` | Write a blank answer key and exit. |
+| `-d`, `--debug` | Re-raise unexpected errors with a traceback. |
 
-Run `python -m src.main` with no arguments for the built-in help.
-
----
-
-## Using the graphical interface instead
-
-```sh
-python -m src.main_gui
-```
-
-Choose **CAJCL State Convention** in the *Form Variant* dropdown. The two extra checkboxes match the command-line options: *Save marked-up copies of the sheets for checking* is `--annotate`, and *Grade anyway when some marks are unclear* is `--allow-unclear`.
+Exit status is `0` when the run finished (whether or not marks need review)
+and `1` for a breaking problem, in which case nothing was written.
 
 ---
 
@@ -467,11 +519,15 @@ If you need to change the sheet, these are the files that matter:
 | `src/grid_info.py` | Describes the same layout to the reader, also derived from `sheet_layout`. |
 | `src/corner_finding.py` | Locates the four registration marks and recovers the grid. |
 | `src/grid_reading.py` | Measures how dark every bubble is. |
+| `src/reading.py` | Turns one page into bubble groups, and applies the cutoff. |
+| `src/thresholds.py` | Calibrates the cutoffs, and parses `--threshold`. |
 | `src/batching.py` | Splits a batch into sheets and enforces page order. |
-| `src/mark_quality.py` | Decides which marks a human needs to settle. |
+| `src/answer_key.py` | Loads and validates the key CSV. |
+| `src/review.py` | Writes the review sheets and reads corrections back. |
+| `src/pipeline.py` | Runs the whole thing and writes the output files. |
 | `src/annotation.py` | Draws the marked-up PDFs. |
-| `src/process_input.py` | Runs the whole pipeline and writes the CSVs. |
-| `open_mcr.py` | Launcher used only when packaging with PyInstaller; see `build_instructions.md`. |
+| `src/console.py` | The progress output. |
+| `tools/review_sheet.gs` | Google Apps Script that formats an imported review CSV. |
 
 Because the generator and the reader both derive from `sheet_layout.py`, moving a block is a one-line change in one file — and `test/test_cajcl.py` fails if the two ever disagree.
 
@@ -493,12 +549,17 @@ Commercially available OMR (optical mark recognition) exam sheets, scanners, and
 
 The original software and multiple choice sheet were developed as an independent study project by Ian Sanders, a mechanical engineering student at the University of South Florida, under the direction of Dr. Autar Kaw. For a detailed discussion of the algorithm, [read the report](https://github.com/iansan5653/open-mcr-report/releases/tag/1.0.0) submitted for that course.
 
+The command line now grades the CAJCL sheet only. The legacy 75- and
+150-question layouts are still described in `grid_info.py` and the pipeline
+can be pointed at them from Python, but they are no longer offered as a
+`--variant`: the key CSV, the Latin-level exclusions, the batch folders and
+the page-code checks are all specific to this sheet. Use
+[upstream OpenMCR](https://github.com/iansan5653/open-mcr) for those sheets.
+
 The other printable sheets remain available:
 
 - [75 Question Variant](https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_75q.pdf)
 - [150 Question Variant](https://github.com/iansan5653/open-mcr/raw/master/src/assets/multiple_choice_sheet_150q.pdf)
-
-For the original operating instructions, see the [Manual](src/assets/manual.md).
 
 To report a bug or request a feature, [file an issue](https://github.com/iansan5653/open-mcr/issues/new).
 
