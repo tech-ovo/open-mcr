@@ -326,7 +326,7 @@ def calibrate(answer_fills: tp.Sequence[float],
     answer_select, answer_review = resolve(answer_split, "Answer",
                                            default.answer_select)
     metadata_select, metadata_review = resolve(metadata_split, "Metadata",
-                                                default.metadata_select)
+                                               default.metadata_select)
     return Thresholds(answer_select, answer_review, metadata_select,
                       metadata_review), notes
 

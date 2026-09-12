@@ -14,6 +14,7 @@ Coordinate conventions
   the grid ends at the centre of the bottom-right square.
 """
 
+import dataclasses
 import typing as tp
 
 # --- Page and grid -------------------------------------------------------
@@ -89,6 +90,9 @@ LATIN_LEVEL_COLUMN = 1
 LATIN_LEVEL_FIRST_ROW = ID_FIRST_BUBBLE_ROW
 LATIN_LEVELS: tp.Tuple[str, ...] = ("MS-1", "MS-2", "MS-3", "HS-1", "HS-2",
                                     "HS-3", "HS-Adv")
+#: How many Latin level bubbles the sheet prints. Renaming them is free;
+#: changing how many there are would move the grid, so it is fixed.
+LATIN_LEVEL_COUNT = len(LATIN_LEVELS)
 
 # --- Page code (front/back marker) ---------------------------------------
 
@@ -141,3 +145,127 @@ def bubble_radius_in() -> float:
 def question_number(subcolumn_index: int, row_index: int) -> int:
     """1-based question number for a row of a test's sub-column."""
     return (subcolumn_index * ROWS_PER_SUBCOLUMN) + row_index + 1
+
+
+# --- wording -------------------------------------------------------------
+# Everything above is geometry and is fixed: move it and the reader stops
+# finding the bubbles. Everything below is only words printed on the page, so
+# it can be changed per convention without touching the grid at all.
+
+
+DEFAULT_TITLE = "CALIFORNIA JUNIOR CLASSICAL LEAGUE"
+
+DEFAULT_DIRECTIONS: tp.Tuple[str, ...] = (
+    "1.  Use a No. 2 pencil or a black or blue pen.",
+    "2.  Fill each bubble completely and darkly, inside the circle.",
+    "3.  To change an answer, erase it completely.",
+    "4.  Print your name and school on the lines above, then bubble your Latin level.",
+    "5.  Bubble your Student ID on both sides of this sheet.",
+    "6.  Copy the 4-digit Test ID printed on each booklet for each test.",
+    "7.  Do not fold or crease this sheet.",
+)
+
+DEFAULT_WRITE_IN_LABELS: tp.Tuple[str, ...] = ("First Name", "Last Name",
+                                               "School")
+
+#: Room on the page, in characters, before a line starts colliding with the
+#: answer columns at this font size.
+MAX_DIRECTION_LENGTH = 86
+MAX_TITLE_LENGTH = 46
+
+
+class SheetTextError(ValueError):
+    """The wording supplied for a sheet cannot be printed as given."""
+
+
+@dataclasses.dataclass(frozen=True)
+class SheetText:
+    """The words printed on a sheet.
+
+    Kept apart from the geometry so it can travel with a request: the grading
+    endpoint needs the Latin level names to validate a key file and to write
+    them into the results, and the sheet generator needs all of it to print.
+    """
+
+    title: str = DEFAULT_TITLE
+    directions: tp.Tuple[str, ...] = DEFAULT_DIRECTIONS
+    latin_levels: tp.Tuple[str, ...] = LATIN_LEVELS
+    write_in_labels: tp.Tuple[str, ...] = DEFAULT_WRITE_IN_LABELS
+
+    def __post_init__(self):
+        if not self.title.strip():
+            raise SheetTextError("The sheet needs a title.")
+        if len(self.title) > MAX_TITLE_LENGTH:
+            raise SheetTextError(
+                f"The title is {len(self.title)} characters; it has to fit "
+                f"across the top of the page, so keep it to "
+                f"{MAX_TITLE_LENGTH}.")
+        if len(self.latin_levels) != LATIN_LEVEL_COUNT:
+            raise SheetTextError(
+                f"The sheet prints {LATIN_LEVEL_COUNT} Latin level bubbles, "
+                f"so it needs exactly {LATIN_LEVEL_COUNT} names; "
+                f"{len(self.latin_levels)} were given. The names can be "
+                "anything, but how many there are is fixed by the grid.")
+        cleaned = [level.strip() for level in self.latin_levels]
+        if any(not level for level in cleaned):
+            raise SheetTextError("A Latin level name is blank.")
+        if len({level.upper() for level in cleaned}) != len(cleaned):
+            raise SheetTextError(
+                "Two Latin levels have the same name, so a key could not say "
+                "which one it excludes.")
+        for level in cleaned:
+            if len(level) > 10:
+                raise SheetTextError(
+                    f"Latin level '{level}' is too long for the space beside "
+                    "its bubble; keep names to 10 characters.")
+        if len(self.write_in_labels) != len(DEFAULT_WRITE_IN_LABELS):
+            raise SheetTextError(
+                f"The sheet has {len(DEFAULT_WRITE_IN_LABELS)} write-in "
+                "lines, so it needs that many labels.")
+        for line in self.directions:
+            if len(line) > MAX_DIRECTION_LENGTH:
+                raise SheetTextError(
+                    f"This direction is {len(line)} characters and would run "
+                    f"into the answer columns:{chr(10)}  {line}{chr(10)}"
+                    f"Keep each line to {MAX_DIRECTION_LENGTH}, or split it "
+                    "across two.")
+        if len(self.directions) > 12:
+            raise SheetTextError(
+                f"{len(self.directions)} lines of directions will not fit "
+                "above the emblem; keep it to 12.")
+
+    @classmethod
+    def from_dict(cls, data: tp.Optional[tp.Mapping[str, tp.Any]]
+                  ) -> "SheetText":
+        """Build from the JSON the website sends. Missing keys keep their
+        defaults."""
+        if not data:
+            return cls()
+
+        def strings(key: str, fallback: tp.Tuple[str, ...]
+                    ) -> tp.Tuple[str, ...]:
+            value = data.get(key)
+            if value is None:
+                return fallback
+            if isinstance(value, str):
+                value = [line for line in value.splitlines()]
+            if not isinstance(value, (list, tuple)):
+                raise SheetTextError(f"'{key}' should be a list of lines.")
+            return tuple(str(line).rstrip() for line in value)
+
+        return cls(title=str(data.get("title") or DEFAULT_TITLE).strip(),
+                   directions=strings("directions", DEFAULT_DIRECTIONS),
+                   latin_levels=tuple(
+                       str(level).strip()
+                       for level in (data.get("latin_levels")
+                                     or LATIN_LEVELS)),
+                   write_in_labels=strings("write_in_labels",
+                                           DEFAULT_WRITE_IN_LABELS))
+
+    def to_dict(self) -> tp.Dict[str, tp.Any]:
+        return {
+            "title": self.title,
+            "directions": list(self.directions),
+            "latin_levels": list(self.latin_levels),
+            "write_in_labels": list(self.write_in_labels),
+        }

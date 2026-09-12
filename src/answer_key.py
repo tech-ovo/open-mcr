@@ -124,26 +124,30 @@ def _parse_answer_cell(cell: str, where: str
     return tuple(accepted)
 
 
-def _parse_excluded(cell: str, where: str) -> tp.FrozenSet[str]:
+def _parse_excluded(cell: str, where: str,
+                    levels_in_use: tp.Sequence[str]) -> tp.FrozenSet[str]:
     levels = {
         part.strip().upper()
         for part in cell.replace(";", ",").split(",") if part.strip()
     }
-    known = {level.upper() for level in layout.LATIN_LEVELS}
+    known = {level.upper() for level in levels_in_use}
     unknown = levels - known
     if unknown:
         raise AnswerKeyError(
             f"{where}: '{', '.join(sorted(unknown))}' is not a Latin level. "
-            f"Use one of {', '.join(layout.LATIN_LEVELS)}.")
+            f"Use one of {', '.join(levels_in_use)}.")
     return frozenset(levels)
 
 
 def load(path: pathlib.Path,
-         questions: int = layout.QUESTIONS_PER_TEST) -> tp.Dict[str, Key]:
+         questions: int = layout.QUESTIONS_PER_TEST,
+         latin_levels: tp.Optional[tp.Sequence[str]] = None
+         ) -> tp.Dict[str, Key]:
     """Read and validate the key file.
 
     Raises AnswerKeyError on anything that would make grading meaningless.
     """
+    levels_in_use = tuple(latin_levels or layout.LATIN_LEVELS)
     try:
         text = path.read_text(encoding="utf-8-sig")
     except OSError as error:
@@ -214,7 +218,8 @@ def load(path: pathlib.Path,
         keys[test_id] = Key(
             name=name or f"Test {test_id}",
             test_id=test_id,
-            excluded_levels=_parse_excluded(cell(EXCLUDED_ROW, column), where),
+            excluded_levels=_parse_excluded(cell(EXCLUDED_ROW, column),
+                                            where, levels_in_use),
             answers=tuple(
                 _parse_answer_cell(cell(str(number), column),
                                    f"{where} question {number}")

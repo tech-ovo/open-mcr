@@ -146,7 +146,10 @@ def _report(result: pipeline.RunResult, options: pipeline.RunOptions,
             f"{console_module.plural(pending, 'mark')} "
             f"{console_module.verb(pending, 'needs', 'need')} manual review. "
             f"See {' and '.join(names)}.")
-        console.line(f"Regrade with overrides via: {_regrade_command(result, options, output, prefix)}", indent=1)
+        console.line(
+            "Regrade with overrides via: "
+            f"{_regrade_command(result, options, output, prefix)}",
+            indent=1)
 
 
 def _regrade_command(result: pipeline.RunResult,

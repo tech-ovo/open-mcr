@@ -277,6 +277,10 @@ class RunOptions(tp.NamedTuple):
     threshold_spec: tp.Optional[str] = None
     annotate: bool = False
     debug: bool = False
+    sheet_text: tp.Optional[layout.SheetText] = None
+    """The wording printed on the sheets being read. Only the Latin level
+    names matter here, but they matter twice: to validate the key's Excluded
+    row, and to write the level into the results."""
 
 
 def _sample_page_indexes(sheets: tp.Sequence[batching.Sheet],
@@ -406,10 +410,12 @@ def run(options: RunOptions,
     questions = variant.questions_per_column
     batch_label = options.batch or ""
 
+    text = options.sheet_text or layout.SheetText()
     keys = None
     if options.key_file is not None:
         try:
-            keys = keys_module.load(options.key_file, questions)
+            keys = keys_module.load(options.key_file, questions,
+                                    latin_levels=text.latin_levels)
         except keys_module.AnswerKeyError as error:
             raise BreakingError(str(error))
 
@@ -456,7 +462,8 @@ def run(options: RunOptions,
                 page_variant = variant.variant_for_page(page.position_in_sheet)
                 try:
                     scans_by_page[(path, page.page_index)] = reading.scan_page(
-                        image, page_variant, page.position_in_sheet)
+                        image, page_variant, page.position_in_sheet,
+                        latin_levels=text.latin_levels)
                 except corner_finding.CornerFindingError as error:
                     unreadable.append(f"{page.label}: {error}")
                 bar.step()

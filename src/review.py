@@ -196,7 +196,8 @@ def collect(paths: tp.Sequence[pathlib.Path]) -> tp.List[pathlib.Path]:
                 if candidate.suffix.lower() != ".csv":
                     continue
                 stem = candidate.stem.lower()
-                if stem.endswith(UNCLEAR_BASENAME.lower()) or                         stem.endswith(MISSING_BASENAME.lower()):
+                if (stem.endswith(UNCLEAR_BASENAME.lower())
+                        or stem.endswith(MISSING_BASENAME.lower())):
                     found.append(candidate)
         else:
             found.append(path)

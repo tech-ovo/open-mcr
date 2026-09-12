@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JCL Convention Grading</title>
+<meta name="description" content="Prepare answer sheets, grade scanned bubble sheets, and review anything unclear.">
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #1a1a1a;
+    --ink-soft: #55534e;
+    --ink-faint: #86837c;
+    --paper: #fbfaf7;
+    --card: #ffffff;
+    --line: #ded9cf;
+    --line-soft: #ece7dd;
+    --accent: #5a3d7a;
+    --accent-soft: #f0eaf6;
+    --good: #2f6b38;
+    --good-soft: #e8f1e8;
+    --warn: #8a5a12;
+    --warn-soft: #fbf0dc;
+    --bad: #9b2c2c;
+    --bad-soft: #fbe9e9;
+    --radius: 10px;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: "Inconsolata", ui-monospace, "Cascadia Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ink: #eceae5; --ink-soft: #b6b2a9; --ink-faint: #8b8780;
+      --paper: #16151a; --card: #1e1d23; --line: #35333c; --line-soft: #2a2930;
+      --accent: #c0a6dd; --accent-soft: #2a2335;
+      --good: #8fd39a; --good-soft: #1d2a1f;
+      --warn: #e5bd77; --warn-soft: #2e2618;
+      --bad: #f0a0a0; --bad-soft: #2f1d1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.6 var(--sans);
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; padding: 2.5rem 1.25rem 6rem; }
+  footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line);
+           font-size: .88rem; color: var(--ink-soft); }
+  footer p { margin: 0 0 .9rem; }
+  footer .note { margin-left: .6rem; }
+  button.ghost { background: none; border: 1px solid var(--line); color: var(--ink-soft);
+                 padding: .45rem .9rem; border-radius: .35rem; cursor: pointer;
+                 font: inherit; }
+  button.ghost:hover { border-color: var(--bad); color: var(--bad); }
+  header.page { margin-bottom: 2.5rem; }
+  header.page h1 {
+    font: 700 2rem/1.2 var(--serif); margin: 0 0 .4rem;
+    letter-spacing: .01em;
+  }
+  header.page p { margin: 0; color: var(--ink-soft); max-width: 46rem; }
+
+  .step {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); margin-bottom: 1rem; overflow: hidden;
+  }
+  .step > summary {
+    list-style: none; cursor: pointer; padding: 1rem 1.25rem;
+    display: flex; align-items: center; gap: .85rem;
+  }
+  .step > summary::-webkit-details-marker { display: none; }
+  .step > summary:hover { background: var(--line-soft); }
+  .step[open] > summary { border-bottom: 1px solid var(--line-soft); }
+  .num {
+    flex: 0 0 auto; width: 1.75rem; height: 1.75rem; border-radius: 50%;
+    display: grid; place-items: center; font: 600 .85rem var(--sans);
+    background: var(--line-soft); color: var(--ink-soft);
+  }
+  .step[data-state="done"] .num { background: var(--good-soft); color: var(--good); }
+  .step[data-state="done"] .num::after { content: "\2713"; }
+  .step[data-state="done"] .num > span { display: none; }
+  .title { font: 600 1.05rem var(--sans); flex: 1; }
+  .hint { color: var(--ink-faint); font-size: .85rem; text-align: right; }
+  .body { padding: 1.25rem; }
+  .body > :first-child { margin-top: 0; }
+  .body > :last-child { margin-bottom: 0; }
+
+  h3 { font: 600 .95rem var(--sans); margin: 1.5rem 0 .5rem;
+       text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); }
+  p { margin: 0 0 .9rem; }
+  .note { color: var(--ink-soft); font-size: .92rem; }
+  a { color: var(--accent); }
+
+  label { display: block; margin-bottom: .9rem; font-size: .92rem; }
+  label > span.lab { display: block; font-weight: 600; margin-bottom: .25rem; }
+  label > span.sub { display: block; color: var(--ink-faint); font-size: .85rem;
+                     font-weight: 400; margin-bottom: .35rem; }
+  input[type=text], input[type=password], input[type=number], textarea, select {
+    width: 100%; padding: .5rem .6rem; font: inherit; color: var(--ink);
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: 7px;
+  }
+  textarea { font-family: var(--mono); font-size: .88rem; resize: vertical; }
+  input:focus, textarea:focus, select:focus {
+    outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent;
+  }
+  input[type=file] { font-size: .9rem; }
+
+  button {
+    font: 600 .92rem var(--sans); padding: .5rem .95rem; cursor: pointer;
+    border-radius: 7px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink);
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  button.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  button.primary:hover:not(:disabled) { filter: brightness(1.12); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0 1rem; }
+
+  .msg { padding: .7rem .9rem; border-radius: 7px; margin: .9rem 0;
+         font-size: .92rem; border: 1px solid transparent; white-space: pre-wrap; }
+  .msg.ok   { background: var(--good-soft); color: var(--good); border-color: var(--good); }
+  .msg.warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+  .msg.bad  { background: var(--bad-soft);  color: var(--bad);  border-color: var(--bad); }
+  .msg.info { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .msg:empty { display: none; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  th, td { text-align: left; padding: .45rem .5rem; border-bottom: 1px solid var(--line-soft); }
+  th { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-faint); }
+  td input[type=text] { padding: .3rem .4rem; }
+  .scroll { overflow-x: auto; }
+  code, .mono { font-family: var(--mono); font-size: .88em; }
+  pre { background: var(--paper); border: 1px solid var(--line); border-radius: 7px;
+        padding: .8rem; overflow-x: auto; font-size: .82rem; margin: 0 0 .9rem; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .chips label { display: inline-flex; align-items: center; gap: .3rem;
+                 margin: 0; padding: .25rem .5rem; border: 1px solid var(--line);
+                 border-radius: 999px; font-size: .85rem; cursor: pointer; }
+  .chips input { margin: 0; }
+
+  .batch { border: 1px solid var(--line); border-radius: 8px;
+           padding: .9rem; margin-bottom: .9rem; }
+  .batch h4 { margin: 0 0 .6rem; font: 600 1rem var(--sans); }
+  .bar { height: 6px; background: var(--line-soft); border-radius: 3px; overflow: hidden; margin: .6rem 0; }
+  .bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .25s; }
+  .files { list-style: none; padding: 0; margin: .6rem 0 0; }
+  .files li { display: flex; gap: .5rem; align-items: center; padding: .25rem 0;
+              border-bottom: 1px solid var(--line-soft); font-size: .88rem; }
+  .files li:last-child { border-bottom: 0; }
+  .files .name { flex: 1; font-family: var(--mono); font-size: .85rem; }
+  .stat { display: inline-block; margin: 0 1.2rem .4rem 0; font-size: .9rem; }
+  .stat b { display: block; font: 700 1.3rem var(--serif); }
+  @media (max-width: 34rem) { .hint { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="page">
+  <h1>JCL Convention Grading</h1>
+  <p>
+    Everything for one convention, in order: build the answer sheet, write the
+    key, print and scan, grade, and settle anything the reader could not read.
+    Your work is kept in this browser only. Scans are sent to the grading
+    server, processed, returned, and discarded — nothing is stored there.
+  </p>
+</header>
+
+<!-- 1 ------------------------------------------------------------------ -->
+<details class="step" id="step-connect" open>
+  <summary><span class="num"><span>1</span></span>
+    <span class="title">Connect to the grading server</span>
+    <span class="hint" id="hint-connect">Not connected</span></summary>
+  <div class="body">
+    <p class="note">You only do this once per computer. Both values are
+      remembered in this browser.</p>
+    <div class="grid2">
+      <label><span class="lab">Server address</span>
+        <span class="sub">The Modal endpoint, ending in <code>.modal.run</code></span>
+        <input type="text" id="endpoint" placeholder="https://yourname--uhsjcl-grading-api.modal.run" autocomplete="off" spellcheck="false"></label>
+      <label><span class="lab">Passphrase</span>
+        <span class="sub">Ask whoever set the server up</span>
+        <input type="password" id="passphrase" autocomplete="off"></label>
+    </div>
+    <div class="row">
+      <button class="primary" id="connect">Connect</button>
+      <button id="forget">Forget these</button>
+    </div>
+    <div class="msg" id="msg-connect"></div>
+  </div>
+</details>
+
+<!-- 2 ------------------------------------------------------------------ -->
+<details class="step" id="step-sheet">
+  <summary><span class="num"><span>2</span></span>
+    <span class="title">Design and print the answer sheet</span>
+    <span class="hint" id="hint-sheet">Default wording</span></summary>
+  <div class="body">
+    <p class="note">
+      Only the wording changes. The bubbles, the corner marks and the grid are
+      fixed — the reader finds them by measurement, so moving them would stop
+      it working. You may rename the seven Latin levels, but not add or remove
+      any.
+    </p>
+    <label><span class="lab">Title across the top</span>
+      <input type="text" id="sheet-title" maxlength="46"></label>
+
+    <h3>Latin levels</h3>
+    <p class="note">Seven names, in the order they are printed down the page.
+      Whatever you write here is what a key file must use in its
+      <code>Excluded</code> row.</p>
+    <div class="grid2" id="levels"></div>
+
+    <h3>Write-in lines</h3>
+    <div class="grid2" id="writeins"></div>
+
+    <h3>Directions</h3>
+    <label><span class="lab">One line each</span>
+      <span class="sub">Up to 12 lines, each at most 86 characters.</span>
+      <textarea id="directions" rows="8"></textarea></label>
+
+    <div class="row">
+      <button class="primary" id="make-sheet">Generate the sheet PDF</button>
+      <button id="reset-sheet">Reset to the standard wording</button>
+    </div>
+    <div class="msg" id="msg-sheet"></div>
+
+    <h3>Printing</h3>
+    <p class="note">
+      Print <strong>double-sided</strong>, flipping on the long edge, at 100%
+      scale. "Fit to page" also reads correctly, but it shrinks the bubbles for
+      no benefit. Do not print two pages to a sheet.
+    </p>
+  </div>
+</details>
+
+<!-- 3 ------------------------------------------------------------------ -->
+<details class="step" id="step-key">
+  <summary><span class="num"><span>3</span></span>
+    <span class="title">Write the answer key</span>
+    <span class="hint" id="hint-key">No tests yet</span></summary>
+  <div class="body">
+    <p class="note">
+      One column per test. Add the tests here, then either type the answers in
+      below or download the file and fill it in a spreadsheet.
+    </p>
+
+    <div class="scroll">
+      <table id="tests">
+        <thead><tr>
+          <th style="min-width:12rem">Test name</th>
+          <th style="width:7rem">Test&nbsp;ID</th>
+          <th>Levels that may <em>not</em> sit it</th>
+          <th style="width:3rem"></th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="row" style="margin-top:.7rem">
+      <button id="add-test">Add a test</button>
+    </div>
+
+    <h3>Answers</h3>
+    <p class="note">
+      Paste 80 answers per test — separated by spaces, commas or newlines, or
+      as one unbroken string like <code>ABCDE…</code>. Several letters together
+      mean <em>all</em> of them are required (<code>ABD</code>); a
+      <code>|</code> separates alternatives (<code>A|BD</code>); an empty
+      answer leaves the question unscored.
+    </p>
+    <div id="answers"></div>
+
+    <div class="row">
+      <button class="primary" id="download-key">Download Keys.csv</button>
+      <label style="margin:0"><input type="file" id="upload-key" accept=".csv"></label>
+    </div>
+    <div class="msg" id="msg-key"></div>
+  </div>
+</details>
+
+<!-- 4 ------------------------------------------------------------------ -->
+<details class="step" id="step-thresholds">
+  <summary><span class="num"><span>4</span></span>
+    <span class="title">Thresholds</span>
+    <span class="hint" id="hint-thresholds">Automatic</span></summary>
+  <div class="body">
+    <p class="note">
+      How dark a bubble has to be before it counts. Leave this alone unless
+      you have a reason: the server measures it from each batch of scans, so a
+      different scanner needs no adjustment.
+    </p>
+    <label><span class="lab">
+      <input type="radio" name="thr" value="auto" checked> Measure it from the scans (recommended)
+    </span></label>
+    <label><span class="lab">
+      <input type="radio" name="thr" value="manual"> Use fixed numbers
+    </span></label>
+    <div id="thr-manual" hidden>
+      <p class="note">
+        Every number is darkness, from 0 (blank paper) to 1 (solid black).
+        <strong>Higher is stricter</strong> — it demands a darker mark. A
+        bubble above the cutoff counts as filled; one between the review
+        threshold and the cutoff is sent for a human to settle. Leave a box
+        empty to have that one measured.
+      </p>
+      <div class="grid2">
+        <label><span class="lab">Answer cutoff</span>
+          <input type="number" id="thr-as" step="0.01" min="0" max="1" placeholder="measured"></label>
+        <label><span class="lab">Answer review threshold</span>
+          <input type="number" id="thr-ar" step="0.01" min="0" max="1" placeholder="measured"></label>
+        <label><span class="lab">ID cutoff</span>
+          <input type="number" id="thr-ms" step="0.01" min="0" max="1" placeholder="measured"></label>
+        <label><span class="lab">ID review threshold</span>
+          <input type="number" id="thr-mr" step="0.01" min="0" max="1" placeholder="measured"></label>
+      </div>
+      <p class="note">After a run, <code>Calibration.txt</code> shows exactly
+        what was used, so you can copy those numbers here to repeat it.</p>
+    </div>
+    <div class="msg" id="msg-thresholds"></div>
+  </div>
+</details>
+
+<!-- 5 ------------------------------------------------------------------ -->
+<details class="step" id="step-scan">
+  <summary><span class="num"><span>5</span></span>
+    <span class="title">Scan the sheets</span>
+    <span class="hint">Read this before scanning</span></summary>
+  <div class="body">
+    <ul>
+      <li>Scan <strong>double-sided</strong>, front page first, so every
+        sheet is two consecutive pages.</li>
+      <li>200–300 dpi. Colour, grayscale or black and white all work.</li>
+      <li><strong>Turn off</strong> auto-rotate, deskew, auto-crop and blank
+        page removal. Blank page removal will quietly drop a lightly-marked
+        page and throw the whole batch out of order.</li>
+      <li>Save one PDF per batch of about
+        <strong><span id="suggest-sheets">25</span> sheets</strong>. Your
+        scanner can usually do this for you — set it to start a new file every
+        <span id="suggest-pages">50</span> pages.</li>
+    </ul>
+    <p class="note" id="limit-note"></p>
+  </div>
+</details>
+
+<!-- 6 ------------------------------------------------------------------ -->
+<details class="step" id="step-grade">
+  <summary><span class="num"><span>6</span></span>
+    <span class="title">Grade the batches</span>
+    <span class="hint" id="hint-grade">Nothing graded</span></summary>
+  <div class="body">
+    <div class="row" style="margin-bottom:1rem">
+      <button id="add-batch">Add a batch</button>
+      <label style="margin:0; display:inline-flex; gap:.4rem; align-items:center">
+        <input type="checkbox" id="annotate"> Also produce marked-up copies of the scans
+      </label>
+    </div>
+    <p class="note">
+      Marked-up copies ring every bubble the reader acted on. They make a run
+      noticeably slower and much larger to download, so leave them off unless
+      you are checking the grading or showing someone how it works.
+    </p>
+    <div id="batches"></div>
+    <div class="msg" id="msg-grade"></div>
+  </div>
+</details>
+
+<!-- 7 ------------------------------------------------------------------ -->
+<details class="step" id="step-review">
+  <summary><span class="num"><span>7</span></span>
+    <span class="title">Settle anything unclear</span>
+    <span class="hint" id="hint-review">Nothing to review</span></summary>
+  <div class="body">
+    <p class="note">
+      Two kinds of thing reach this step. <strong>Unclear</strong> is a bubble
+      too faint to call — the reader neither counts it nor ignores it, and asks
+      instead. <strong>Missing</strong> is a required field it could not read
+      at all. A question left blank is not an error: that is the student's
+      choice.
+    </p>
+
+    <h3>Set the spreadsheet up, once</h3>
+    <ol>
+      <li>Make a Google Sheet you will reuse all convention.</li>
+      <li><strong>Extensions → Apps Script</strong>, paste in
+        <a href="review_sheet.gs" download>review_sheet.gs</a>, and Save.</li>
+      <li>Click the <strong>Triggers</strong> (clock) icon →
+        <strong>Add Trigger</strong>: function
+        <code>onSpreadsheetChange</code>, source <em>From spreadsheet</em>,
+        type <em>On change</em>. Save and accept the prompt.</li>
+    </ol>
+
+    <h3>For each review file</h3>
+    <ol>
+      <li><strong>File → Import → Insert new sheet(s)</strong> and pick the
+        CSV. It has to create a <em>new sheet</em> — "Replace current sheet"
+        will not trigger the script.</li>
+      <li>The script adds the checkboxes, restores leading zeros, fits the
+        columns and trims the blank rows. Several people can work at once.</li>
+      <li>Tick every box in <strong>Done</strong>. A row that is not ticked
+        will be refused — an untouched row means nobody has looked at it.</li>
+      <li><strong>File → Download → Comma-separated values</strong>, and bring
+        it back below.</li>
+    </ol>
+
+    <div id="review-batches"></div>
+    <div class="msg" id="msg-review"></div>
+  </div>
+</details>
+
+<footer>
+  <p>
+    Nothing you upload is kept on the server. Each batch is unpacked into a
+    temporary folder, graded, and deleted before the results come back — there
+    is no database and no file store behind this page. Your test names, keys,
+    thresholds and results are held in <em>this browser</em>, on this device,
+    so you can close the page and come back to it. Scans are never stored on
+    either side.
+  </p>
+  <p>
+    <button id="reset" class="ghost">Start a new convention</button>
+    <span class="note">Clears everything saved in this browser. Download
+      anything you still need first.</span>
+  </p>
+</footer>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>

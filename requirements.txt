@@ -48,3 +48,16 @@ flake8>=7.1,<8
 # 0.40 is the first release to vendor its own copy of lib2to3, which Python
 # 3.13 dropped from the standard library. 0.40.0 and 0.40.1 are yanked on PyPI.
 yapf>=0.40.2,<1
+
+# --- hosted grading service ----------------------------------------------
+# Only needed to run or test server/grading_api.py. Grading from the command
+# line needs none of this.
+
+# The `standard` extra brings uvicorn (to serve the app) and httpx (which
+# fastapi.testclient.TestClient imports), both of which the tests need.
+fastapi[standard]>=0.115,<1
+
+# Deploys that same app to Modal. The import in server/grading_api.py is
+# wrapped in try/except, so the module still imports - and its tests still
+# run - on a machine that has never heard of Modal.
+modal>=1.0,<2

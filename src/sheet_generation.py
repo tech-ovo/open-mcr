@@ -38,7 +38,8 @@ ASSETS_DIR = pathlib.Path(__file__).parent / "assets"
 LOGO_PATH = ASSETS_DIR / "cajcl.png"
 DEFAULT_OUTPUT = ASSETS_DIR / "cajcl_answer_sheet.pdf"
 
-TITLE = "CALIFORNIA JUNIOR CLASSICAL LEAGUE"
+#: Kept for callers that just want the stock sheet.
+TITLE = layout.DEFAULT_TITLE
 
 # The title, footer, and collation bar are placed relative to the *grid*, not
 # to the paper edge, so that nothing printed sits closer to an edge than the
@@ -66,15 +67,7 @@ FOOTER_FONT_SIZE = 7
 #: of the bottom corner marks.
 COLLATION_BAR_INSET_IN = 0.4
 
-DIRECTIONS: tp.Tuple[str, ...] = (
-    "1.  Use a No. 2 pencil or a black or blue pen.",
-    "2.  Fill each bubble completely and darkly, inside the circle.",
-    "3.  To change an answer, erase it completely.",
-    "4.  Print your name and school on the lines above, then bubble your Latin level.",
-    "5.  Bubble your Student ID on both sides of this sheet.",
-    "6.  Copy the 4-digit Test ID printed on each booklet for each test.",
-    "7.  Do not fold or crease this sheet.",
-)
+DIRECTIONS: tp.Tuple[str, ...] = layout.DEFAULT_DIRECTIONS
 
 
 # --- primitives ----------------------------------------------------------
@@ -161,11 +154,11 @@ def _registration_marks(c: pdfcanvas.Canvas):
 # --- header, page code, collation mark -----------------------------------
 
 
-def _header(c: pdfcanvas.Canvas):
+def _header(c: pdfcanvas.Canvas, text: layout.SheetText):
     """Just the title. Which side you are looking at is said by the page-code
     bubbles immediately below and again by the footer."""
     _, y = layout.cell_to_inches(0, TITLE_ROW)
-    _text_centered(c, layout.PAGE_WIDTH_IN / 2, y, TITLE, size=11,
+    _text_centered(c, layout.PAGE_WIDTH_IN / 2, y, text.title, size=11,
                    font=SERIF_BOLD, char_space=1.4)
 
 
@@ -236,20 +229,20 @@ def _digit_block(c: pdfcanvas.Canvas, first_column: int, caption: str,
             _label_in_cell(c, column, row, str(digit))
 
 
-def _latin_level_block(c: pdfcanvas.Canvas):
+def _latin_level_block(c: pdfcanvas.Canvas, text: layout.SheetText):
     column = layout.LATIN_LEVEL_COLUMN
     _caption(c, column, layout.ID_LABEL_ROW, "Latin Level")
-    for index, level in enumerate(layout.LATIN_LEVELS):
+    for index, level in enumerate(text.latin_levels):
         row = layout.LATIN_LEVEL_FIRST_ROW + index
         _bubble(c, column, row)
         x, y = layout.cell_to_inches(column + 1, row + 0.5)
         _text(c, x + 0.02, y - 0.035, level, size=8)
 
 
-def _write_in_lines(c: pdfcanvas.Canvas):
+def _write_in_lines(c: pdfcanvas.Canvas, text: layout.SheetText):
     left, _ = layout.cell_to_inches(0, 0)
     right, _ = layout.cell_to_inches((layout.GRID_COLUMNS / 2) - 0.5, 0)
-    for offset, caption in enumerate(("First Name", "Last Name", "School")):
+    for offset, caption in enumerate(text.write_in_labels):
         _, y = layout.cell_to_inches(0, 21.6 + (offset * 2.6))
         _text(c, left, y, caption, size=9, font=SERIF_BOLD)
         label_width = c.stringWidth(caption, SERIF_BOLD, 9) / 72
@@ -258,12 +251,12 @@ def _write_in_lines(c: pdfcanvas.Canvas):
                right * inch, (y - 0.025) * inch)
 
 
-def _directions(c: pdfcanvas.Canvas):
+def _directions(c: pdfcanvas.Canvas, text: layout.SheetText):
     left, _ = layout.cell_to_inches(0, 0)
     _, heading_y = layout.cell_to_inches(0, 30)
     _text(c, left, heading_y, "DIRECTIONS", size=9, font=SERIF_BOLD,
           char_space=1.0)
-    for index, line in enumerate(DIRECTIONS):
+    for index, line in enumerate(text.directions):
         _, y = layout.cell_to_inches(0, 31.4 + (index * 1.1))
         _text(c, left, y, line, size=7.6)
 
@@ -322,18 +315,20 @@ def _test_block(c: pdfcanvas.Canvas, page_index: int, test_on_page: int,
 # --- pages ---------------------------------------------------------------
 
 
-def draw_page(c: pdfcanvas.Canvas, page_index: int):
+def draw_page(c: pdfcanvas.Canvas, page_index: int,
+              text: tp.Optional[layout.SheetText] = None):
+    text = text or layout.SheetText()
     _registration_marks(c)
-    _header(c)
+    _header(c, text)
     _page_code(c, page_index)
 
     _digit_block(c, layout.STUDENT_ID_COLUMN, "Student ID",
                  layout.STUDENT_ID_DIGITS)
 
     if page_index == 0:
-        _latin_level_block(c)
-        _write_in_lines(c)
-        _directions(c)
+        _latin_level_block(c, text)
+        _write_in_lines(c, text)
+        _directions(c, text)
         _logo(c)
 
     tests_before = sum(
@@ -346,14 +341,16 @@ def draw_page(c: pdfcanvas.Canvas, page_index: int):
     _footer(c, page_index)
 
 
-def render(output_path: pathlib.Path) -> pathlib.Path:
+def render(output_path: pathlib.Path,
+           text: tp.Optional[layout.SheetText] = None) -> pathlib.Path:
     """Write the complete two-page sheet to ``output_path``."""
+    text = text or layout.SheetText()
     output_path = pathlib.Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     c = pdfcanvas.Canvas(str(output_path), pagesize=LETTER)
-    c.setTitle("CAJCL State Convention Answer Sheet")
+    c.setTitle(text.title)
     for page_index in range(layout.PAGES_PER_SHEET):
-        draw_page(c, page_index)
+        draw_page(c, page_index, text)
         c.showPage()
     c.save()
     return output_path

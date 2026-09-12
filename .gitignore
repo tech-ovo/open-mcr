@@ -112,8 +112,9 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
+# The Apps Script file is authored once in tools/ and copied next to the
+# page by the deploy workflow, so the copy under site/ is generated.
+site/review_sheet.gs
 
 # mypy
 .mypy_cache/

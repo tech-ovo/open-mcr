@@ -104,7 +104,8 @@ def _digit_labels(count: int) -> tp.Tuple[str, ...]:
 
 def scan_page(image: tp.Any, form_variant: grid_i.FormVariant,
               page_index_on_sheet: int,
-              debug_path: tp.Optional[tp.Any] = None) -> PageScan:
+              debug_path: tp.Optional[tp.Any] = None,
+              latin_levels: tp.Optional[tp.Sequence[str]] = None) -> PageScan:
     """Measure every bubble on a page. Applies no thresholds."""
     prepared = image_utils.prepare_scan_for_processing(image,
                                                        save_path=debug_path)
@@ -150,6 +151,7 @@ def scan_page(image: tp.Any, form_variant: grid_i.FormVariant,
                             required=required))
         return tuple(built)
 
+    levels = tuple(latin_levels or layout.LATIN_LEVELS)
     page_code_groups = groups_for(grid_i.Field.PAGE_CODE, 0, "Page code",
                                   lambda n: tuple(
                                       str(i + 1) for i in range(n)),
@@ -157,7 +159,7 @@ def scan_page(image: tp.Any, form_variant: grid_i.FormVariant,
     student_id = groups_for(grid_i.Field.STUDENT_ID, 0, "Student ID",
                             _digit_labels, required=True, per_field_name=True)
     latin_groups = groups_for(grid_i.Field.LATIN_LEVEL, 0, "Latin level",
-                              lambda n: layout.LATIN_LEVELS[:n],
+                              lambda n: levels[:n],
                               required=True, per_field_name=False)
 
     tests: tp.List[tp.Tuple[BubbleGroup, tp.Tuple[BubbleGroup, ...]]] = []

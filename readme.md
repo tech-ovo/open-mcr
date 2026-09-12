@@ -25,6 +25,7 @@ answer sheet.
 - [**Grading from the command line, step by step**](#grading-from-the-command-line-step-by-step)
 - [Thresholds](#thresholds)
 - [Command reference](#command-reference)
+- [**Grading in a browser**](#grading-in-a-browser)
 - [How the pieces fit together](#how-the-pieces-fit-together)
 - [Background and license](#background-and-license)
 
@@ -48,6 +49,7 @@ answer sheet.
 | **Regrade without rescanning** | `--regrade` re-scores an existing `Results.csv` against a corrected key or corrected review sheets. |
 | **Question statistics** | `Question Stats.csv` gives per-question counts and percent correct. |
 | **Marked-up PDFs** | `--annotate` rings every bubble the reader acted on, answers and metadata alike. |
+| **A website, for everyone else** | The same pipeline behind a hosted endpoint, driven by a one-page site that walks an operator through all seven steps. Nothing is stored on the server. |
 
 ---
 
@@ -508,6 +510,113 @@ and `1` for a breaking problem, in which case nothing was written.
 
 ---
 
+## Grading in a browser
+
+Everything above needs a terminal and a checkout. For the people who run the
+convention, there is a website instead: one page, seven steps, no install. It
+talks to a small service that runs this same pipeline.
+
+### What is stored where
+
+**Nothing is stored on the server.** Each request unpacks its uploads into a
+temporary directory, runs the pipeline, reads the results back into memory, and
+deletes the directory before it replies. There is no database, no volume, no
+object store and no job queue. A scan that has been graded is gone from the
+server the moment the response is sent, and a scan that was never graded — a
+request that failed halfway — is deleted just the same, because the cleanup runs
+in a `finally` block.
+
+That guarantee is also why there is no "submit now, collect later" job API: a
+result that outlives its request has to be kept somewhere. Each request grades
+one batch and returns it, start to finish.
+
+The browser keeps more than the server does. Your test names, Test IDs, answer
+keys, thresholds and the `Results.csv` of every batch you have graded live in
+that browser's `localStorage`, so you can close the page and come back to it
+mid-convention. Scans are never stored, on either side: they go from the file
+input to the server and the results come back in the same response. Marked-up
+PDFs are offered as a download and then dropped. Use **Start a new convention**
+at the foot of the page to clear it all.
+
+### Deploying the service
+
+The service is a FastAPI app in `server/grading_api.py`, deployed on
+[Modal](https://modal.com). It is gated by a shared passphrase, which the
+website sends as an `X-Grading-Key` header.
+
+```sh
+pip install modal
+modal setup
+
+# Pick something long. Everyone who grades will need it.
+modal secret create grading-passphrase GRADING_PASSPHRASE=<a long passphrase>
+
+modal deploy server/grading_api.py
+```
+
+Modal prints the endpoint URL. That URL and the passphrase are the two things an
+operator types into step 1.
+
+To rotate the passphrase, create the secret again with a new value and redeploy.
+Anyone still on the old one gets *"The server did not accept that passphrase."*
+
+### Deploying the website
+
+The site is `site/` — one HTML file, one JavaScript file, no build step and no
+dependencies. Any static host will serve it. `.github/workflows/deploy_site.yml`
+publishes it to GitHub Pages on every push that touches `site/`, and copies
+`tools/review_sheet.gs` in alongside it so step 7 can link to the Apps Script.
+
+For a custom domain such as `grading.uhsjcl.org`, set a repository variable
+named `SITE_DOMAIN` to that host and point a `CNAME` record at
+`<owner>.github.io`. Without the variable it publishes at the default github.io
+address.
+
+The service allows requests from any origin, so the site can live anywhere,
+including a file opened from disk. The passphrase is what limits access, not the
+domain.
+
+### The seven steps
+
+| Step | What it does |
+|---|---|
+| **1. Connect** | Endpoint and passphrase. The page asks the server how the sheet is laid out — how many tests, questions, Student ID digits and Latin levels — so the rest of the form matches the real sheet rather than a hardcoded copy of it. |
+| **2. Design and print the sheet** | The title, the directions, the seven Latin level names and the write-in labels, as text boxes. Generates the printable PDF. Cosmetic only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
+| **3. Write the key** | A test per row — name, Test ID, which Latin levels may not sit it — and a box for its 80 answers. Builds `Keys.csv` in the same transposed layout `--key` expects, and offers it as a download so it can be kept, edited and uploaded next year. |
+| **4. Thresholds** | Calibrated per batch by default. The four numbers can be pinned, individually or together, exactly as `--threshold` does. |
+| **5. Scan** | The scanner settings, and how big a batch should be. |
+| **6. Grade batches** | One card per batch, each with its own file input and its own results. Batches are independent, so a second one can be added at any time and the first one's results stay put. |
+| **7. Settle unclear marks** | `Unclear.csv` and `Missing.csv` per batch, the link to `review_sheet.gs`, and the upload that feeds the corrections back and re-scores without the scans. |
+
+### Batch size
+
+One upload may be at most 40 MB, and a request may run for ten minutes. A batch
+of 25 sheets — 50 pages — is the size the page suggests: it lands well inside
+both.
+
+**Split large jobs at the scanner, not in the browser.** If the convention is
+300 sheets, scan twelve PDFs of 25 rather than one of 300, and add twelve
+batches on the page. Each gets its own results, its own review sheets and its
+own calibration, and the page keeps them side by side. Splitting a 600-page PDF
+in JavaScript would mean holding it all in memory in a browser tab, which is a
+worse place for it than the scanner's own document feeder.
+
+### Endpoints
+
+If you would rather script against the service than use the page:
+
+| | |
+|---|---|
+| `GET /health` | Sheet facts, default wording, and the limits. Also the cheapest way to check a passphrase. |
+| `POST /sheet` | Layout JSON in, answer-sheet PDF out. |
+| `GET /key-template` | The blank `Keys.csv`. |
+| `POST /grade` | Multipart: `scans[]`, `key`, `overrides[]`, `batch`, `threshold`, `annotate`, `layout`. Returns a summary and every output file. |
+| `POST /regrade` | An existing `Results.csv` plus a corrected key or corrected review sheets. No image processing. |
+
+Every one of them takes the `X-Grading-Key` header.
+
+---
+
 ## How the pieces fit together
 
 If you need to change the sheet, these are the files that matter:
@@ -528,6 +637,8 @@ If you need to change the sheet, these are the files that matter:
 | `src/annotation.py` | Draws the marked-up PDFs. |
 | `src/console.py` | The progress output. |
 | `tools/review_sheet.gs` | Google Apps Script that formats an imported review CSV. |
+| `server/grading_api.py` | The hosted service — the same pipeline behind an HTTP endpoint. |
+| `site/` | The one-page website that drives it. |
 
 Because the generator and the reader both derive from `sheet_layout.py`, moving a block is a one-line change in one file — and `test/test_cajcl.py` fails if the two ever disagree.
 
@@ -539,7 +650,7 @@ Run the tests with:
 python -m pytest
 ```
 
-`test/test_cajcl.py` builds real sheets with the real generator, bubbles them in, and reads them back, so it catches layout drift, mis-collation, and mis-scoring.
+`test/test_cajcl.py` builds real sheets with the real generator, bubbles them in, and reads them back, so it catches layout drift, mis-collation, and mis-scoring. `test/test_server.py` drives the hosted service the same way, through a real HTTP client, and checks that each request leaves nothing behind on disk.
 
 ---
 

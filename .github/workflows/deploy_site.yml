@@ -1,0 +1,61 @@
+name: Deploy Site
+
+# Publishes site/ to GitHub Pages. There is no build step: the page is plain
+# HTML, CSS and JavaScript, so "building" means copying the folder and dropping
+# in the Apps Script file, which is authored in tools/ and served next to the
+# page so step 7 can link to it.
+#
+# To use a custom domain (grading.uhsjcl.org, say), set a repository variable
+# named SITE_DOMAIN to that host and point a CNAME record at
+# <owner>.github.io. Leave the variable unset to publish at the default
+# github.io address.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'site/**'
+      - 'tools/review_sheet.gs'
+      - '.github/workflows/deploy_site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A run already in flight is allowed to finish; only queued runs are dropped.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp -r site/. _site/
+          cp tools/review_sheet.gs _site/review_sheet.gs
+
+      - name: Set the custom domain
+        if: vars.SITE_DOMAIN != ''
+        run: echo "${{ vars.SITE_DOMAIN }}" > _site/CNAME
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
