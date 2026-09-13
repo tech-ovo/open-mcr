@@ -44,19 +44,21 @@ class SheetData(tp.NamedTuple):
     faint_fraction: float = 0.18
 
 
-@functools.lru_cache(maxsize=1)
-def _blank_pages() -> tp.Tuple[np.ndarray, ...]:
+@functools.lru_cache(maxsize=4)
+def _blank_pages(text: tp.Optional[layout.SheetText] = None
+                 ) -> tp.Tuple[np.ndarray, ...]:
     """Rasterise the two blank sheet pages as grayscale images.
 
-    Cached: rendering the sheet is by far the slowest part of building a
-    batch, and every sheet starts from the same blank.
+    Cached on the wording: rendering the sheet is by far the slowest part of
+    building a batch, and every sheet with the same wording starts from the
+    same blank. SheetText is a frozen dataclass of tuples, so it hashes.
     """
     directory = pathlib.Path(tempfile.mkdtemp(prefix="open-mcr-blank-"))
     try:
         path = directory / "blank.pdf"
         canvas = pdfcanvas.Canvas(str(path), pagesize=LETTER)
         for page_index in range(layout.PAGES_PER_SHEET):
-            sheet_generation.draw_page(canvas, page_index)
+            sheet_generation.draw_page(canvas, page_index, text)
             canvas.showPage()
         canvas.save()
         document = pdfium.PdfDocument(str(path))
@@ -115,15 +117,18 @@ def _test_position(test_index: int) -> tp.Tuple[int, int]:
     raise IndexError(test_index)
 
 
-def render_sheet(sheet: SheetData) -> tp.List[np.ndarray]:
+def render_sheet(sheet: SheetData,
+                 text: tp.Optional[layout.SheetText] = None
+                 ) -> tp.List[np.ndarray]:
     """Return the two filled-in page images for one sheet."""
-    pages = [page.copy() for page in _blank_pages()]
+    pages = [page.copy() for page in _blank_pages(text)]
+    levels = text.latin_levels if text else layout.LATIN_LEVELS
 
     for page in pages:
         _stamp_digits(page, layout.STUDENT_ID_COLUMN, sheet.student_id)
 
     if sheet.latin_level:
-        index = layout.LATIN_LEVELS.index(sheet.latin_level)
+        index = levels.index(sheet.latin_level)
         _stamp(pages[0], layout.LATIN_LEVEL_COLUMN,
                layout.LATIN_LEVEL_FIRST_ROW + index)
 
@@ -167,7 +172,8 @@ def write_pdf(pages: tp.Sequence[np.ndarray], path: pathlib.Path
 
 
 def write_batch(sheets: tp.Sequence[SheetData], path: pathlib.Path,
-                page_order: tp.Optional[tp.Sequence[int]] = None
+                page_order: tp.Optional[tp.Sequence[int]] = None,
+                text: tp.Optional[layout.SheetText] = None
                 ) -> pathlib.Path:
     """Render several sheets into one PDF, front page of each sheet first.
 
@@ -176,7 +182,7 @@ def write_batch(sheets: tp.Sequence[SheetData], path: pathlib.Path,
     """
     pages: tp.List[np.ndarray] = []
     for sheet in sheets:
-        pages.extend(render_sheet(sheet))
+        pages.extend(render_sheet(sheet, text))
     if page_order is not None:
         pages = [pages[index] for index in page_order]
     return write_pdf(pages, path)

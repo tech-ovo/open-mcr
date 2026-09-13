@@ -147,11 +147,23 @@ def test_sheet_honours_custom_wording(client):
     assert "Do not fold" in text
 
 
-def test_sheet_rejects_the_wrong_number_of_levels(client):
-    response = client.post("/sheet", headers=auth(),
-                           json={"layout": {"latin_levels": ["A", "B"]}})
+def test_sheet_takes_a_different_number_of_levels(client):
+    """Two is the floor and ten the ceiling; anything between is fine."""
+    for count in (2, 10):
+        response = client.post(
+            "/sheet", headers=auth(),
+            json={"layout": {
+                "latin_levels": [f"L{n}" for n in range(1, count + 1)]}})
+        assert response.status_code == 200, response.text
+        assert response.content[:4] == b"%PDF"
+
+
+def test_sheet_rejects_too_many_levels(client):
+    response = client.post(
+        "/sheet", headers=auth(),
+        json={"layout": {"latin_levels": [f"L{n}" for n in range(1, 12)]}})
     assert response.status_code == 400
-    assert "exactly 7" in response.json()["detail"]
+    assert "between 2 and 10" in response.json()["detail"]
 
 
 # --- grading --------------------------------------------------------------

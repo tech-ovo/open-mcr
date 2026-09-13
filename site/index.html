@@ -121,6 +121,8 @@
   button.danger:hover:not(:disabled) { background: var(--bad-soft); color: var(--bad); }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .row { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
+  /* A row of buttons needs air before whatever explains it. */
+  .row + p, .row + .note, .row + ul, .row + h3 { margin-top: 1rem; }
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
            gap: 0 1rem; }
 
@@ -298,10 +300,11 @@
       <button id="invite">Copy an invite link</button>
     </div>
     <p class="note">
-      An invite link fills both boxes in for whoever opens it, so nobody has to
-      be walked through this step. <strong>The passphrase is inside the
-      link</strong> — anyone who has it can grade. Send it the way you would
-      send the passphrase itself, and not somewhere public.
+      An invite link carries the server details and your sheet wording, so
+      whoever opens it starts where you are. It does not carry your tests,
+      answers or results. <strong>The passphrase is inside the link</strong> —
+      anyone who has it can grade, so send it the way you would send the
+      passphrase itself, and not somewhere public.
     </p>
     <div class="msg" id="msg-connect"></div>
   </div>
@@ -314,23 +317,42 @@
     <span class="hint" id="hint-sheet">Default wording</span></summary>
   <div class="body">
     <p class="note">
-      You can change the wording, but the bubbles, corner marks, and the grid
-      are fixed. You may rename the seven Latin levels, but not add or remove
-      any.
+      You can change the wording, and how many Latin levels there are. The
+      bubbles, corner marks, and the grid itself are fixed.
+    </p>
+    <p class="note">
+      <strong>Reprint the sheet after any change here.</strong> The reader
+      works from these settings, so a stack printed from an older version will
+      not line up with them.
     </p>
     <label><span class="lab">Title across the top</span>
       <input type="text" id="sheet-title" maxlength="46"></label>
 
     <h3 id="h-levels">Latin levels</h3>
+    <p class="note" id="level-note">
+      One bubble each, printed top to bottom in this order. A key refers to
+      them by these names, so renaming one here renames it everywhere.
+    </p>
     <div class="grid2" id="levels"></div>
+    <div class="row" id="level-buttons" hidden>
+      <button id="add-level">Add a level</button>
+      <button id="drop-level">Remove the last</button>
+      <span class="note" id="level-count"></span>
+    </div>
 
     <h3 id="h-writeins">Write-in lines</h3>
+    <p class="note" id="writein-note">
+      Ruled lines for students to write on by hand. Nothing written on them is
+      read by the software — only the bubbles are. They are there so a sheet
+      can be matched to a person if the Student ID goes wrong.
+    </p>
     <div class="grid2" id="writeins"></div>
 
     <h3>Directions</h3>
     <label><span class="lab">One line each</span>
       <span class="sub">Up to 12 lines, each at most 86 characters.</span>
-      <textarea id="directions" rows="8"></textarea></label>
+      <textarea id="directions" rows="8"></textarea>
+      <span class="note" id="directions-count"></span></label>
 
     <div class="row">
       <button class="primary" id="make-sheet">Generate PDF</button>
@@ -592,10 +614,10 @@
       start grading the first stack while the rest is still being scanned.
     </p>
     <p class="note">
-      A batch cannot be re-graded. If a mark was read wrong or the key was
-      wrong, fix it in step 7: that re-scores from the results already here,
-      without re-reading the scans. If the paper itself needs re-reading, scan
-      it again and add it as a new batch.
+      If a mark was read wrong or the key was wrong, fix it in step 7: that
+      re-scores from the results already here, without re-reading the scans.
+      If the paper itself needs re-reading, scan it again and add it as a new
+      batch — a batch that has been graded stays as it was.
     </p>
     <h3>Which tests to grade</h3>
     <p class="note">
@@ -633,9 +655,10 @@
       all. A question left blank is not an error: that is the student's choice.
     </p>
     <p class="note">
-      Each file asks for one correction per row. Open it, look at the marked-up
-      scan or the paper, fill in the answer, tick <strong>Done</strong>, save,
-      and bring it back here.
+      Each file asks for one correction per row. Open it, check the paper, fill
+      in the answer, mark the row <strong>Done</strong>, and upload it below.
+      Every row has to be marked Done — an untouched row means nobody has
+      looked at it, and the upload is refused.
     </p>
 
     <h3>Google Sheets is optional</h3>
@@ -653,8 +676,7 @@
       columns, and trims the blank rows.
     </p>
     <ol class="note">
-      <li>Make a Google Sheet you will reuse for the whole event, and share
-        it with whoever is helping.</li>
+      <li>Create a Google Sheet shared with whoever is helping.</li>
       <li><strong>Extensions → Apps Script</strong>, paste in
         <a href="Sheet.gs" download>Sheet.gs</a>, and Save.</li>
       <li>Click the <strong>Triggers</strong> (clock) icon →
@@ -667,11 +689,6 @@
       <li>When the sheet is finished, <strong>File → Download →
         Comma-separated values</strong>.</li>
     </ol>
-    <p class="note">
-      However you edit it, every row needs <strong>Done</strong> ticked. An
-      untouched row will be refused, because it means nobody has looked at it.
-    </p>
-
     <div id="review-batches"></div>
     <div class="msg" id="msg-review"></div>
   </div>

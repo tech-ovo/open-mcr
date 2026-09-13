@@ -16,6 +16,7 @@
 
 const STORE_KEY = 'jcl-grading-v1';
 const GAP = '-';               // a question not filled in yet
+const MAX_DIRECTIONS = 12;     // what fits above the bubbles
 const VOID = 'X';              // a question deliberately not scored
 
 const state = load();
@@ -138,6 +139,10 @@ function setStep(id, done, hintId, hint) {
 
 /* Open a later step once the one before it is done, but only the first time:
    re-opening something deliberately collapsed is worse than leaving it shut. */
+/* Sheet wording from an invite link, applied once /health has supplied the
+   defaults it was expressed against. */
+let invited = null;
+
 const advanced = new Set();
 function advance(id) {
   if (advanced.has(id)) return;
@@ -245,9 +250,31 @@ function filePicker(host, { accept, multiple = false, label = 'Choose file' }) {
    bar, so it does not sit in the history of the machine that opened it. The
    passphrase is still in whatever the link was sent through, which is why the
    page says so in as many words. */
+/* Only what differs from the server's own defaults, so a link stays short
+   when nothing has been customised. */
+function customSheet() {
+  const sheet = state.sheet;
+  const defaults = state.limits && state.limits.defaults;
+  if (!sheet || !defaults) return null;
+  const changed = {};
+  ['title', 'latin_levels', 'write_in_labels', 'directions'].forEach((field) => {
+    if (JSON.stringify(sheet[field]) !== JSON.stringify(defaults[field])) {
+      changed[field] = sheet[field];
+    }
+  });
+  return Object.keys(changed).length ? changed : null;
+}
+
 function inviteLink() {
-  const payload = JSON.stringify({ e: $('endpoint').value.trim(),
-                                   p: $('passphrase').value });
+  // The wording travels; the tests, answers and results do not. They would
+  // make the link unwieldy, and they are the part worth keeping private.
+  const payload = JSON.stringify({
+    e: $('endpoint').value.trim(),
+    p: $('passphrase').value,
+    s: customSheet() || undefined,
+    t: state.thresholdMode === 'manual' ? state.threshold : undefined,
+    o: Array.isArray(state.onlyTests) ? state.onlyTests : undefined,
+  });
   const bytes = new TextEncoder().encode(payload);
   const base64 = btoa(String.fromCharCode(...bytes))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -269,6 +296,13 @@ function readInvite() {
     state.passphrase = payload.p || '';
     $('endpoint').value = state.endpoint;
     $('passphrase').value = state.passphrase;
+    if (payload.t) {
+      state.thresholdMode = 'manual';
+      state.threshold = Object.assign(blank().threshold, payload.t);
+    }
+    if (Array.isArray(payload.o)) state.onlyTests = payload.o;
+    // The sheet wording has to wait for the defaults it is a diff against.
+    invited = payload.s || null;
     save();
     return true;
   } catch (error) {
@@ -305,7 +339,15 @@ async function connect() {
   try {
     const health = await call('/health');
     state.limits = health;
-    if (!state.sheet) state.sheet = health.defaults;
+    // A copy, not the defaults themselves: the sheet is compared against them
+    // to tell custom wording from stock, and to reset back to it. Sharing one
+    // object would quietly edit the baseline along with the sheet.
+    const defaults = () => JSON.parse(JSON.stringify(health.defaults));
+    if (!state.sheet) state.sheet = defaults();
+    if (invited) {
+      state.sheet = Object.assign(defaults(), invited);
+      invited = null;
+    }
     save();
     say('msg-connect', 'ok',
         `Connected. This sheet has ${health.tests_per_sheet} tests of ` +
@@ -317,7 +359,7 @@ async function connect() {
     renderWhichTests();
     renderSheetForm();
     renderTests();
-    ['step-sheet', 'step-tests', 'step-key', 'step-thresholds', 'step-grade',
+    ['step-sheet', 'step-tests', 'step-key', 'step-grade',
      'step-review'].forEach(advance);
   } catch (error) {
     say('msg-connect', 'bad', error.message);
@@ -344,8 +386,9 @@ function renderSheetForm() {
   // The wording comes from the server, so until step 1 is done there is
   // nothing to put under these headings. Take them down rather than leave
   // them standing over empty space.
-  $('h-levels').hidden = !sheet;
-  $('h-writeins').hidden = !sheet;
+  ['h-levels', 'level-note', 'h-writeins', 'writein-note'].forEach((id) => {
+    if ($(id)) $(id).hidden = !sheet;
+  });
   if (!sheet) {
     $('levels').textContent = '';
     $('levels').append(el('p', { className: 'note', textContent:
@@ -355,6 +398,7 @@ function renderSheetForm() {
   }
   $('sheet-title').value = sheet.title;
   $('directions').value = sheet.directions.join('\n');
+  renderDirectionCount();
 
   const levels = $('levels');
   levels.textContent = '';
@@ -380,16 +424,75 @@ function renderSheetForm() {
     ]));
   });
 
+  renderLevelButtons();
   const custom = JSON.stringify(sheet) !== JSON.stringify(state.limits?.defaults);
   setStep('step-sheet', true, 'hint-sheet',
           custom ? 'Custom wording' : 'Default wording');
 }
 
+function levelLimits() {
+  const limits = state.limits || {};
+  return { min: limits.latin_level_min || 2, max: limits.latin_level_max || 10 };
+}
+
+function renderLevelButtons() {
+  const row = $('level-buttons');
+  if (!row) return;
+  const sheet = state.sheet;
+  row.hidden = !sheet;
+  if (!sheet) return;
+  const { min, max } = levelLimits();
+  const count = sheet.latin_levels.length;
+  $('add-level').disabled = count >= max;
+  $('drop-level').disabled = count <= min;
+  $('level-count').textContent =
+    count + ' of ' + max + ' levels. Any test already limited to a level you ' +
+    'remove loses it.';
+}
+
+function setLevelCount(next) {
+  const sheet = state.sheet;
+  const { min, max } = levelLimits();
+  if (!sheet || next < min || next > max) return;
+  const levels = sheet.latin_levels.slice();
+  while (levels.length < next) levels.push('Level ' + (levels.length + 1));
+  levels.length = next;
+  sheet.latin_levels = levels;
+  // A test allowed only on a level that no longer exists would be a test
+  // nobody can take, so those positions are dropped.
+  state.tests.forEach((test) => {
+    if (!Array.isArray(test.allowed)) return;
+    const kept = test.allowed.filter((index) => index < next);
+    test.allowed = kept.length ? kept : null;
+  });
+  save();
+  renderSheetForm();
+  renderTests();
+}
+
+function renderDirectionCount() {
+  const box = $('directions-count');
+  if (!box) return;
+  const lines = $('directions').value.split('\n');
+  const over = lines.length - MAX_DIRECTIONS;
+  box.textContent = over > 0
+    ? (lines.length + ' lines. Only the first ' + MAX_DIRECTIONS +
+       ' will be printed.')
+    : lines.filter((line) => line.trim()).length + ' of ' + MAX_DIRECTIONS +
+      ' lines';
+  box.style.color = over > 0 ? 'var(--warn)' : 'var(--ink-faint)';
+}
+
+function directionsFromBox() {
+  return $('directions').value
+    .split('\n').map((line) => line.replace(/\s+$/, ''))
+    .filter((line, index, all) => line !== '' || index < all.length - 1)
+    .slice(0, MAX_DIRECTIONS);
+}
+
 function readSheetForm() {
   state.sheet.title = $('sheet-title').value.trim();
-  state.sheet.directions = $('directions').value
-    .split('\n').map((line) => line.replace(/\s+$/, ''))
-    .filter((line, index, all) => line !== '' || index < all.length - 1);
+  state.sheet.directions = directionsFromBox();
   save();
   return state.sheet;
 }
@@ -998,6 +1101,18 @@ function testsSpec() {
   return kept.length === testsPerSheet() ? '' : kept.join(',');
 }
 
+/* Which side of the sheet a test number is printed on. Spelled out beside
+   the checkboxes so they are not mistaken for the tests listed in step 3. */
+function sideOfTest(number) {
+  const perPage = (state.limits && state.limits.tests_on_page) || [1, 2];
+  let seen = 0;
+  for (let page = 0; page < perPage.length; page++) {
+    seen += perPage[page];
+    if (number <= seen) return page === 0 ? 'front' : 'back';
+  }
+  return 'back';
+}
+
 function renderWhichTests() {
   const host = $('which-tests');
   if (!host) return;
@@ -1019,7 +1134,8 @@ function renderWhichTests() {
       state.onlyTests = next.length === testsPerSheet() ? null : next;
       save(); renderWhichTests();
     };
-    host.append(el('label', {}, [box, 'Test ' + number]));
+    host.append(el('label', {}, [box, 'Test ' + number + ' (' +
+                                      sideOfTest(number) + ')']));
   }
 }
 
@@ -1343,8 +1459,20 @@ function start() {
     save(); renderSheetForm(); renderTests();
     say('msg-sheet', 'ok', 'Back to the standard wording.');
   };
-  $('sheet-title').oninput = () => save();
-  $('directions').oninput = () => save();
+  // Typing has to reach the state, not just re-save the old value:
+  // anything that re-renders the form would put the old text back.
+  $('sheet-title').oninput = () => {
+    if (state.sheet) state.sheet.title = $('sheet-title').value;
+    save();
+  };
+  $('directions').oninput = () => {
+    if (state.sheet) state.sheet.directions = directionsFromBox();
+    save(); renderDirectionCount();
+  };
+  $('add-level').onclick = () =>
+    setLevelCount(state.sheet ? state.sheet.latin_levels.length + 1 : 0);
+  $('drop-level').onclick = () =>
+    setLevelCount(state.sheet ? state.sheet.latin_levels.length - 1 : 0);
 
   $('add-test').onclick = () => {
     state.tests.push(newTest());

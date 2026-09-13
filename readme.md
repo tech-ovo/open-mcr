@@ -37,7 +37,7 @@ answer sheet.
 |---|---|
 | **A two-page CAJCL sheet** | Three 80-question tests (240 questions) on one double-sided sheet, set in Times, with the CAJCL emblem in grayscale at the foot of the front page. |
 | **Five-digit Student ID** | Bubbled in the same five columns on **both** sides, so a back page that gets separated can still be matched to its front. |
-| **Latin level as bubbles** | MS-1, MS-2, MS-3, HS-1, HS-2, HS-3, HS-Adv. Renaming them is free; the count is a code change (see below). |
+| **Latin level as bubbles** | MS-1, MS-2, MS-3, HS-1, HS-2, HS-3, HS-Adv by default. Both the names and how many there are can be set per run, from 2 to 10. |
 | **Directions on the sheet** | Printed on the front page. |
 | **Front/back markers** | A machine-readable page-code bubble and a solid collation bar along the bottom - left on the front, right on the back. |
 | **Batch folders** | `--batch 3` reads `<input>/Batch 3` and writes `<output>/Batch 3`, and names the review sheets after the batch. |
@@ -661,7 +661,7 @@ domain.
 | Step | What it does |
 |---|---|
 | **1. Connect** | Endpoint and passphrase, or an invite link that carries both (see below). The page asks the server how the sheet is laid out — how many tests, questions, Student ID digits and Latin levels — so the rest of the form matches the real sheet rather than a hardcoded copy of it. |
-| **2. Design and print the answer sheet** | The title, the directions, the seven Latin level names and the write-in labels, as text boxes. Generates the printable PDF. Wording only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
+| **2. Design and print the answer sheet** | The title, the directions, the write-in labels, and the Latin levels — rename them, or add and remove them between 2 and 10. Generates the printable PDF. Wording only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
 | **3. List the tests** | A row per test — name, Test ID, and which Latin levels may take it. Test IDs are zero-padded to four digits when you leave the box, and two tests may share an ID when their levels do not overlap. |
 | **4. Enter the answers** | Three ways into the same data, and you can mix them: download the template and fill it in a spreadsheet, paste a whole test's answers at once, or type into the grid of every question. `Keys.csv` is offered back whenever it holds work that is not already in a file you have. Uploading merges by Test ID rather than replacing, and there is an Undo. |
 | **5. Thresholds** | Automatic per batch. Tick the override to pin the four numbers, individually or together, exactly as `--threshold` does. |
@@ -683,8 +683,15 @@ worse place for it than the scanner's own document feeder.
 
 ### Invite links
 
-**Copy an invite link** in step 1 builds a URL that fills the server address
-and passphrase in for whoever opens it. The details ride in the URL *fragment*,
+**Copy an invite link** in step 1 builds a URL that sets up the page for
+whoever opens it: the server address, the passphrase, your sheet wording
+(title, Latin levels, write-in lines, directions), any pinned thresholds, and
+which tests to grade. Only the parts you have actually changed travel, so a
+link stays short when nothing is customised.
+
+It deliberately does **not** carry your tests, answer keys or results. Those
+would make the link unwieldy, and `Keys.csv` is already a file made to be
+passed around. The details ride in the URL *fragment*,
 which browsers never send to a web server, and the page wipes it from the
 address bar as soon as it has read it - so it does not linger in the guest's
 history.
@@ -734,15 +741,20 @@ If you need to change the sheet, these are the files that matter:
 
 Because the generator and the reader both derive from `sheet_layout.py`, moving a block is a one-line change in one file — and `test/test_cajcl.py` fails if the two ever disagree.
 
-**Renaming a Latin level is free; changing how many there are is a code
-change.** `sheet_layout.LATIN_LEVELS` is the one list: the generator prints a
-bubble per entry and `grid_info` reads a bubble per entry, so editing that
-tuple moves both together. The block grows downward from
-`LATIN_LEVEL_FIRST_ROW` and the write-in lines start at row 21.6, so up to
-about 14 levels fit before anything else has to move. Everything beyond the
-count — the names — can be set per run, from `--layout` or from the website,
-and the server refuses a list of the wrong length rather than printing a sheet
-its own reader cannot parse.
+**The Latin levels are set per run, names and count alike.** Hand
+`SheetText(latin_levels=...)` a tuple of 2 to 10 names and both sides follow it:
+`sheet_generation` prints a bubble per entry, and `grid_info.form_for(n)` builds
+a reader grid expecting exactly that many. Nothing else has to change, and the
+two cannot drift apart because they are built from the same number.
+
+`sheet_layout.MAX_LATIN_LEVELS` is 10. The block grows downward from
+`LATIN_LEVEL_FIRST_ROW` and the write-in lines start at row 21.6, so about 14
+would physically fit; the cap is set below that to leave room for a long name
+and a tight printer margin. Raising it means checking that clearance again.
+
+A sheet printed with one set of levels must be graded with the same set —
+`RunOptions.sheet_text` carries them into the run, and the reader's grid is
+derived from it.
 
 **Keep every bubble at the same outline weight.** The reader measures a disc
 slightly smaller than the printed circle, so a heavier ring spills into that

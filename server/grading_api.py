@@ -216,6 +216,12 @@ def build_app():
             "test_id_digits": sheet_layout.TEST_ID_DIGITS,
             "options": sheet_layout.OPTIONS,
             "latin_level_count": sheet_layout.LATIN_LEVEL_COUNT,
+            "latin_level_min": sheet_layout.MIN_LATIN_LEVELS,
+            "latin_level_max": sheet_layout.MAX_LATIN_LEVELS,
+            # How many tests sit on each side, so a caller can say which page
+            # a test number lands on without knowing the layout.
+            "tests_on_page": [len(page)
+                              for page in sheet_layout.PAGE_SUBCOLUMNS],
             "defaults": defaults.to_dict(),
             "max_upload_bytes": MAX_UPLOAD_BYTES,
             "suggested_sheets_per_batch": SUGGESTED_SHEETS_PER_BATCH,

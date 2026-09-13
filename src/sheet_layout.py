@@ -90,9 +90,16 @@ LATIN_LEVEL_COLUMN = 1
 LATIN_LEVEL_FIRST_ROW = ID_FIRST_BUBBLE_ROW
 LATIN_LEVELS: tp.Tuple[str, ...] = ("MS-1", "MS-2", "MS-3", "HS-1", "HS-2",
                                     "HS-3", "HS-Adv")
-#: How many Latin level bubbles the sheet prints. Renaming them is free;
-#: changing how many there are would move the grid, so it is fixed.
+#: How many Latin level bubbles the sheet prints by default.
 LATIN_LEVEL_COUNT = len(LATIN_LEVELS)
+
+#: How few and how many it may be asked for instead. The block grows downward
+#: from LATIN_LEVEL_FIRST_ROW and the write-in lines begin at row 21.6, which
+#: leaves room for about 14; the cap is set below that so a long name and a
+#: tight printer margin still have somewhere to go. Both the printed sheet and
+#: the reader's grid are built from the count, so they cannot disagree.
+MIN_LATIN_LEVELS = 2
+MAX_LATIN_LEVELS = 10
 
 # --- Page code (front/back marker) ---------------------------------------
 
@@ -202,19 +209,20 @@ class SheetText:
                 f"The title is {len(self.title)} characters; it has to fit "
                 f"across the top of the page, so keep it to "
                 f"{MAX_TITLE_LENGTH}.")
-        if len(self.latin_levels) != LATIN_LEVEL_COUNT:
+        if not MIN_LATIN_LEVELS <= len(self.latin_levels) \
+                <= MAX_LATIN_LEVELS:
             raise SheetTextError(
-                f"The sheet prints {LATIN_LEVEL_COUNT} Latin level bubbles, "
-                f"so it needs exactly {LATIN_LEVEL_COUNT} names; "
-                f"{len(self.latin_levels)} were given. The names can be "
-                "anything, but how many there are is fixed by the grid.")
+                f"A sheet needs between {MIN_LATIN_LEVELS} and "
+                f"{MAX_LATIN_LEVELS} Latin levels; "
+                f"{len(self.latin_levels)} were given. Beyond that the block "
+                "runs into the write-in lines below it.")
         cleaned = [level.strip() for level in self.latin_levels]
         if any(not level for level in cleaned):
             raise SheetTextError("A Latin level name is blank.")
         if len({level.upper() for level in cleaned}) != len(cleaned):
             raise SheetTextError(
                 "Two Latin levels have the same name, so a key could not say "
-                "which one it excludes.")
+                "which one it allows.")
         for level in cleaned:
             if len(level) > 10:
                 raise SheetTextError(

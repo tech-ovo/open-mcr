@@ -430,6 +430,51 @@ def test_parse_tests_normalises_the_spec():
         pipeline.parse_tests("two", 3)
 
 
+def test_a_sheet_can_carry_a_different_number_of_levels(tmp_path):
+    """Ten levels: printed, bubbled, and read back as the right one."""
+    levels = tuple(f"Level {n}" for n in range(1, 11))
+    text = layout.SheetText(latin_levels=levels)
+
+    scans = tmp_path / "scans"
+    scans.mkdir(parents=True, exist_ok=True)
+    ss.write_batch([ss.SheetData(student_id="04275", latin_level=levels[8],
+                                 test_ids=TEST_IDS,
+                                 answers=[cycled(0), cycled(1), cycled(2)])],
+                   scans / "batch.pdf", text=text)
+
+    key = write_key(tmp_path / "k.csv", [
+        ("Latin Literature", "1001", "", cycled(0)),
+        ("Reading Comprehension 1", "1002", "Level 9", cycled(1)),
+        ("Mythology", "1003", "Level 1, Level 2", cycled(2)),
+    ])
+    options = pipeline.RunOptions(input_folder=scans,
+                                  output_folder=tmp_path / "out",
+                                  key_file=key, sheet_text=text)
+    result = pipeline.run(options, console.Console(enabled=False))
+
+    by_test = {row.test_id: row for row in result.rows}
+    assert by_test["1001"].latin_level == "Level 9"
+    assert by_test["1001"].points == QUESTIONS
+    # Level 9 may take 1002, but 1003 is limited to levels 1 and 2.
+    assert by_test["1002"].points == QUESTIONS
+    assert by_test["1003"].status == answer_key.TEST_NOT_ALLOWED
+
+
+def test_the_level_block_is_capped(tmp_path):
+    with pytest.raises(layout.SheetTextError, match="between 2 and 10"):
+        layout.SheetText(latin_levels=tuple(f"L{n}" for n in range(11)))
+    with pytest.raises(layout.SheetTextError, match="between 2 and 10"):
+        layout.SheetText(latin_levels=("Only one", ))
+
+
+def test_the_reader_grid_follows_the_level_count():
+    """Generator and reader are built from the same number."""
+    for count in (2, 7, 10):
+        field = grid_info.form_for(count).variant_for_page(0).fields[
+            grid_info.Field.LATIN_LEVEL]
+        assert field.field_length == count
+
+
 def test_unknown_test_id_is_recorded_not_fatal(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
                          test_ids=("9876", "1002", "1003"),

@@ -1,4 +1,5 @@
 import enum
+import functools
 import typing as tp
 
 from . import alphabet
@@ -280,22 +281,27 @@ _PAGE_CODE_FIELD = _single_choice_field(sheet_layout.PAGE_CODE_FIRST_COLUMN,
                                         sheet_layout.PAGE_CODE_OPTIONS,
                                         Orientation.HORIZONTAL)
 
-form_cajcl_page1 = _cajcl_page(
-    0,
-    {
-        Field.PAGE_CODE: _PAGE_CODE_FIELD,
-        Field.STUDENT_ID: _digit_field(sheet_layout.STUDENT_ID_COLUMN,
-                                       sheet_layout.STUDENT_ID_DIGITS),
-        Field.LATIN_LEVEL: _single_choice_field(
-            sheet_layout.LATIN_LEVEL_COLUMN,
-            sheet_layout.LATIN_LEVEL_FIRST_ROW,
-            len(sheet_layout.LATIN_LEVELS), Orientation.VERTICAL),
-        Field.TEST_FORM_CODE: _digit_field(
-            sheet_layout.PAGE_TEST_ID_COLUMNS[0][0],
-            sheet_layout.TEST_ID_DIGITS),
-    },
-    CAJCL_OUTPUT_FIELDS,
-)
+
+def _front_page(latin_levels: int) -> FormVariant:
+    return _cajcl_page(
+        0,
+        {
+            Field.PAGE_CODE: _PAGE_CODE_FIELD,
+            Field.STUDENT_ID: _digit_field(sheet_layout.STUDENT_ID_COLUMN,
+                                           sheet_layout.STUDENT_ID_DIGITS),
+            Field.LATIN_LEVEL: _single_choice_field(
+                sheet_layout.LATIN_LEVEL_COLUMN,
+                sheet_layout.LATIN_LEVEL_FIRST_ROW,
+                latin_levels, Orientation.VERTICAL),
+            Field.TEST_FORM_CODE: _digit_field(
+                sheet_layout.PAGE_TEST_ID_COLUMNS[0][0],
+                sheet_layout.TEST_ID_DIGITS),
+        },
+        CAJCL_OUTPUT_FIELDS,
+    )
+
+
+form_cajcl_page1 = _front_page(len(sheet_layout.LATIN_LEVELS))
 
 form_cajcl_page2 = _cajcl_page(
     1,
@@ -350,6 +356,20 @@ class TwoSidedFormVariant():
 
 
 form_cajcl = TwoSidedFormVariant([form_cajcl_page1, form_cajcl_page2])
+
+
+@functools.lru_cache(maxsize=None)
+def form_for(latin_levels: int) -> TwoSidedFormVariant:
+    """The reader's grid for a sheet printed with this many Latin levels.
+
+    Only the front page differs, and only in how many bubbles the level block
+    holds. Built from the same number the generator prints from, so the two
+    cannot drift apart.
+    """
+    if latin_levels == len(sheet_layout.LATIN_LEVELS):
+        return form_cajcl
+    return TwoSidedFormVariant([_front_page(latin_levels), form_cajcl_page2])
+
 
 #: Fields whose value is read on the front page and belongs to the whole
 #: sheet, so it is carried forward onto the rows produced by the back page.

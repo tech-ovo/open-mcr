@@ -462,11 +462,12 @@ def run(options: RunOptions,
     """
     from . import file_handling
 
-    variant = form_variant or grid_i.form_cajcl
+    text = options.sheet_text or layout.SheetText()
+    # The grid is derived from the wording, so a sheet printed with a
+    # different number of Latin levels is read with a matching number.
+    variant = form_variant or grid_i.form_for(len(text.latin_levels))
     questions = variant.questions_per_column
     batch_label = options.batch or ""
-
-    text = options.sheet_text or layout.SheetText()
     keys = None
     if options.key_file is not None:
         try:
