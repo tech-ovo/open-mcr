@@ -39,7 +39,10 @@ function blank() {
 
 function newTest() {
   return {
-    name: '', id: '', excluded: [], answers: [],
+    // Which levels may take this test, held as positions in the sheet's list
+    // rather than names: renaming level 7 in step 2 must not strand a test
+    // that still says "HS-Adv". null means every level.
+    name: '', id: '', allowed: null, answers: [],
     dirty: false,    // answers changed by hand since the last file was loaded
     edits: [],       // question indices typed into the grid, so they can be
                      // shown in bold again after a reload
@@ -61,6 +64,22 @@ function load() {
            : textToAnswers(test.answers || ''),
   }));
   if (!result.tests.length) result.tests = [newTest()];
+  // Older saved work named the levels, and older still named the excluded
+  // ones. Both become positions.
+  const levels = (result.sheet && result.sheet.latin_levels) || [];
+  const positionOf = (name) => levels.findIndex(
+    (level) => level.toUpperCase() === String(name).toUpperCase());
+  result.tests.forEach((test) => {
+    if (Array.isArray(test.excluded) && levels.length && test.allowed == null) {
+      test.allowed = levels
+        .map((level, index) => (test.excluded.includes(level) ? -1 : index))
+        .filter((index) => index >= 0);
+    } else if (Array.isArray(test.allowed) &&
+               test.allowed.some((item) => typeof item === 'string')) {
+      test.allowed = test.allowed.map(positionOf).filter((index) => index >= 0);
+    }
+    delete test.excluded;
+  });
   // Batches used to carry an editable label instead of a fixed number.
   result.batches = (result.batches || []).map((batch, index) => Object.assign(
     {}, batch, { n: batch.n || Number(batch.label) || index + 1 }));
@@ -128,6 +147,10 @@ function advance(id) {
 
 function questionCount() {
   return state.limits ? state.limits.questions_per_test : 80;
+}
+
+function levelNames() {
+  return state.sheet ? state.sheet.latin_levels.slice() : [];
 }
 
 // --- talking to the server -------------------------------------------------
@@ -254,12 +277,7 @@ function renderLimits() {
   $('suggest-sheets').textContent = limits.suggested_sheets_per_batch;
   $('suggest-pages').textContent =
     limits.suggested_sheets_per_batch * limits.pages_per_sheet;
-  $('limit-note').textContent =
-    'One upload may be at most ' +
-    Math.round(limits.max_upload_bytes / 1048576) +
-    ' MB. If a batch is larger than that, split it at the scanner and grade ' +
-    'the pieces as separate batches — each gets its own results, and this ' +
-    'page keeps them side by side.';
+  $('limit-mb').textContent = Math.round(limits.max_upload_bytes / 1048576);
 }
 
 // --- 2. the sheet ----------------------------------------------------------
@@ -366,15 +384,23 @@ function renderTests() {
       }
     };
 
+    const allowed = allowedPositions(test);
     const chips = el('div', { className: 'chips' });
-    levels.forEach((level) => {
+    levels.forEach((level, position) => {
       const box = el('input', { type: 'checkbox',
-                                checked: test.excluded.includes(level) });
+                                checked: allowed.includes(position) });
       box.onchange = () => {
-        test.excluded = box.checked
-          ? test.excluded.concat([level])
-          : test.excluded.filter((item) => item !== level);
-        save(); refreshKey();
+        const next = box.checked
+          ? allowed.concat([position]).sort((a, b) => a - b)
+          : allowed.filter((item) => item !== position);
+        if (!next.length) {
+          // A test nobody may take cannot be graded at all.
+          box.checked = true;
+          return say('msg-tests', 'bad',
+                     'At least one level has to be able to take each test.');
+        }
+        test.allowed = next;
+        save(); renderTests();
       };
       chips.append(el('label', {}, [box, level]));
     });
@@ -491,8 +517,11 @@ function renderGrid() {
       const input = el('input', { type: 'text', maxLength: 11,
                                   value: test.answers[index] || '' });
       if (test.edits.includes(index)) input.classList.add('edited');
+      const permitted = new RegExp(
+        '[^' + (state.limits ? state.limits.options : 'ABCDE') + VOID + '|]',
+        'g');
       input.oninput = () => {
-        const text = input.value.toUpperCase().replace(/[^A-Z|]/g, '');
+        const text = input.value.toUpperCase().replace(permitted, '');
         input.value = text;
         while (test.answers.length < need) test.answers.push('');
         test.answers[index] = text;
@@ -516,7 +545,7 @@ function cellProblem(cell) {
   const letters = state.limits ? state.limits.options : 'ABCDE';
   const alternatives = cell.split('|');
   if (alternatives.some((item) => item === '')) {
-    return 'has a stray "|". Write alternatives as A|BD, with a letter on ' +
+    return 'has a stray "|" — write alternatives as A|BD, with a letter on ' +
            'each side of it';
   }
   for (const alternative of alternatives) {
@@ -527,7 +556,7 @@ function cellProblem(cell) {
       }
     }
     if (new Set(alternative).size !== alternative.length) {
-      return 'repeats a letter';
+      return 'repeats a letter in "' + alternative + '"';
     }
   }
   const seen = alternatives.map((item) => item.split('').sort().join(''));
@@ -543,12 +572,28 @@ function firstKeyProblem() {
       const problem = cellProblem(test.answers[index]);
       if (problem) {
         return 'Test ' + (test.id ? "'" + test.id + "'" : test.name) +
-               ', question ' + (index + 1) + ': "' + test.answers[index] +
-               '" ' + problem + '.';
+               ', question ' + (index + 1) + ' ' + problem + '.';
       }
     }
   }
   return '';
+}
+
+/* The positions this test allows, defaulting to all of them. */
+function allowedPositions(test) {
+  const levels = levelNames();
+  if (!Array.isArray(test.allowed)) return levels.map((_, index) => index);
+  return test.allowed.filter((index) => index < levels.length);
+}
+
+function allowsEveryLevel(test) {
+  const levels = levelNames();
+  return !levels.length || allowedPositions(test).length === levels.length;
+}
+
+function allowedNames(test) {
+  const levels = levelNames();
+  return allowedPositions(test).map((index) => levels[index]);
 }
 
 function csvCell(value) {
@@ -564,7 +609,10 @@ function buildKeyCsv(withAnswers = true) {
   const rows = [
     ['Name'].concat(tests.map((test) => test.name)),
     ['Test ID'].concat(tests.map((test) => test.id)),
-    ['Excluded'].concat(tests.map((test) => test.excluded.join(', '))),
+    // Blank means every level, which is both shorter and what the server
+    // reads a blank cell as.
+    ['Allowed'].concat(tests.map(
+      (test) => (allowsEveryLevel(test) ? '' : allowedNames(test).join(', ')))),
   ];
   for (let number = 1; number <= need; number++) {
     rows.push([String(number)].concat(tests.map(
@@ -580,17 +628,44 @@ function refreshKey() {
   updateKeyMessage();
 }
 
+/* Sharing a Test ID is allowed, so long as no student could match both. */
+function firstIdClash(tests) {
+  const levels = levelNames();
+  for (let i = 0; i < tests.length; i++) {
+    for (let j = i + 1; j < tests.length; j++) {
+      if (tests[i].id !== tests[j].id) continue;
+      const other = allowedPositions(tests[j]);
+      const both = allowedPositions(tests[i])
+        .filter((position) => other.includes(position))
+        .map((position) => levels[position]);
+      // With no levels known yet, a shared ID is still a clash.
+      if (both.length || !levels.length) {
+        return {
+          id: tests[i].id,
+          first: tests[i].name || tests[i].id,
+          second: tests[j].name || tests[j].id,
+          levels: both.length ? both : levels,
+        };
+      }
+    }
+  }
+  return null;
+}
+
 function updateKeyMessage() {
   const withId = state.tests.filter((test) => test.id);
   const need = questionCount();
   const complete = withId.filter((test) => answered(test) === need);
   state.keyCsv = withId.length ? buildKeyCsv() : '';
 
-  const ids = withId.map((test) => test.id);
-  const duplicate = ids.find((id, index) => ids.indexOf(id) !== index);
-  if (duplicate) {
+  const clash = firstIdClash(withId);
+  const duplicate = clash ? clash.id : '';
+  if (clash) {
     say('msg-tests', 'bad',
-        'Test ID ' + duplicate + ' is used twice. Each test needs its own.');
+        'Test ID ' + clash.id + ' is used by both "' + clash.first + '" and "' +
+        clash.second + '", and both accept ' + clash.levels.join(', ') +
+        '. Two tests may share an ID only when the levels that may take them ' +
+        'do not overlap.');
   } else if (withId.length) {
     say('msg-tests', '', '');
   } else if (state.tests.some((test) => test.name)) {
@@ -725,8 +800,16 @@ function readKeyCsv(text, filename) {
   }
 
   const names = rowFor('Name') || [];
-  const excluded = rowFor('Excluded') || [];
+  if (rowFor('Excluded') && !rowFor('Allowed')) {
+    throw new Error(
+      'That file has an "Excluded" row, which listed the levels that could ' +
+      'not take each test. It has been replaced by "Allowed", which lists ' +
+      'the levels that can. Rewrite the row the other way around and rename ' +
+      'it, so a file is never read as saying the opposite of what it says.');
+  }
+  const allowedRow = rowFor('Allowed') || [];
   const digits = state.limits ? state.limits.test_id_digits : 4;
+  const levels = levelNames();
   const need = questionCount();
   const numbered = new Map();
   rows.forEach((row) => {
@@ -741,11 +824,21 @@ function readKeyCsv(text, filename) {
       const row = numbered.get(number);
       answers.push(((row && row[column]) || '').toUpperCase());
     }
+    const listed = (allowedRow[column] || '').split(',')
+      .map((item) => item.trim()).filter(Boolean);
+    const positions = listed.map((name) => levels.findIndex(
+      (level) => level.toUpperCase() === name.toUpperCase()));
+    const stray = listed.filter((_, index) => positions[index] < 0);
+    if (stray.length) {
+      throw new Error(
+        '"' + stray[0] + '" in the Allowed row is not one of this sheet\u2019s ' +
+        'Latin levels (' + levels.join(', ') + '). Check the spelling, or ' +
+        'rename the level in step 2 first.');
+    }
     loaded.push(Object.assign(newTest(), {
       name: names[column] || '',
       id: /^\d+$/.test(id) ? id.padStart(digits, '0') : id,
-      excluded: (excluded[column] || '').split(',')
-        .map((item) => item.trim()).filter(Boolean),
+      allowed: listed.length ? positions : null,
       answers: answers,
     }));
   });
@@ -771,7 +864,11 @@ function uploadKey(file) {
     const had = merged.length;
     let updated = 0;
     loaded.forEach((incoming) => {
-      const match = merged.find((test) => test.id && test.id === incoming.id);
+      // Matched on ID *and* levels, because an ID may now name two tests.
+      const match = merged.find(
+        (test) => test.id && test.id === incoming.id &&
+                  String(allowedPositions(test)) ===
+                  String(allowedPositions(incoming)));
       // The file is now the record of what this test says, so its answers stop
       // counting as hand-edited.
       if (match) { Object.assign(match, incoming); updated++; }
@@ -836,7 +933,7 @@ function renderBatches() {
   host.textContent = '';
   if (!state.batches.length) {
     host.append(el('p', { className: 'note',
-      textContent: 'No batches yet. Add one for each PDF from the scanner.' }));
+      textContent: 'No batches yet.' }));
   }
   state.batches.forEach((batch, index) => host.append(batchCard(batch, index)));
 
@@ -974,6 +1071,13 @@ function summaryView(batch) {
        plural(summary.test_not_found, 'row has', 'rows have') +
        ' a Test ID that is not in the key. Check the key, or correct the ' +
        'Test ID in step 7.']));
+  }
+  if (summary.level_needed) {
+    box.append(el('div', { className: 'msg warn' },
+      [summary.level_needed + ' ' +
+       plural(summary.level_needed, 'row has', 'rows have') +
+       ' a Test ID with one key per Latin level, and the level itself could ' +
+       'not be read. Fill it in on the Missing sheet in step 7 and re-score.']));
   }
   if (summary.test_not_allowed) {
     box.append(el('div', { className: 'msg warn' },

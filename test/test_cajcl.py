@@ -36,14 +36,14 @@ def write_key(path: Path, tests=None) -> Path:
     column per test."""
     tests = tests or [
         ("Latin Literature", "1001", "", cycled(0)),
-        ("Reading Comprehension 1", "1002", "HS-Adv", cycled(1)),
+        ("Reading Comprehension 1", "1002", "MS-1, MS-2, MS-3, HS-1, HS-2, HS-3", cycled(1)),
         ("Mythology", "1003", "", cycled(2)),
     ]
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow([answer_key.NAME_ROW] + [t[0] for t in tests])
         writer.writerow([answer_key.TEST_ID_ROW] + [t[1] for t in tests])
-        writer.writerow([answer_key.EXCLUDED_ROW] + [t[2] for t in tests])
+        writer.writerow([answer_key.ALLOWED_ROW] + [t[2] for t in tests])
         for number in range(1, QUESTIONS + 1):
             writer.writerow([str(number)] +
                             [t[3][number - 1] for t in tests])
@@ -178,6 +178,61 @@ def test_key_rejects_duplicate_test_ids(tmp_path):
         answer_key.load(path)
 
 
+def test_one_test_id_can_carry_a_key_per_level(tmp_path):
+    """The same printed test, marked differently for different levels."""
+    path = write_key(tmp_path / "k.csv", [
+        ("Reading Comp (lower)", "1002", "MS-1, MS-2, MS-3", cycled(0)),
+        ("Reading Comp (upper)", "1002", "HS-1, HS-2, HS-3, HS-Adv", cycled(1)),
+    ])
+    keys = answer_key.load(path)
+    assert len(keys.variants("1002")) == 2
+
+    lower = keys.lookup("1002", "MS-2")
+    upper = keys.lookup("1002", "HS-3")
+    assert lower is not None and upper is not None
+    assert lower.name == "Reading Comp (lower)"
+    assert upper.name == "Reading Comp (upper)"
+
+    # A middle school sheet marked with the lower key scores full marks, and
+    # the upper key would score it zero.
+    marked = [{letter} for letter in cycled(0)]
+    assert lower.score(marked)[0] == QUESTIONS
+    assert upper.score(marked)[0] == 0
+
+
+def test_key_rejects_two_tests_sharing_an_id_and_a_level(tmp_path):
+    path = write_key(tmp_path / "k.csv", [
+        ("Lower", "1002", "MS-1, MS-2, HS-1", cycled(0)),
+        ("Upper", "1002", "HS-1, HS-2", cycled(1)),
+    ])
+    with pytest.raises(answer_key.AnswerKeyError, match="HS-1"):
+        answer_key.load(path)
+
+
+def test_key_rejects_a_shared_id_where_one_allows_every_level(tmp_path):
+    """A blank Allowed cell means every level, so it overlaps anything."""
+    path = write_key(tmp_path / "k.csv", [
+        ("Everyone", "1002", "", cycled(0)),
+        ("Upper", "1002", "HS-1", cycled(1)),
+    ])
+    with pytest.raises(answer_key.AnswerKeyError, match="used twice"):
+        answer_key.load(path)
+
+
+def test_key_refuses_the_old_excluded_row(tmp_path):
+    """Reading it as Allowed would score exactly the wrong students."""
+    path = tmp_path / "old.csv"
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([answer_key.NAME_ROW, "One"])
+        writer.writerow([answer_key.TEST_ID_ROW, "1001"])
+        writer.writerow(["Excluded", "HS-Adv"])
+        for number in range(1, QUESTIONS + 1):
+            writer.writerow([str(number), "A"])
+    with pytest.raises(answer_key.AnswerKeyError, match="was replaced by"):
+        answer_key.load(path)
+
+
 def test_key_rejects_an_unknown_latin_level(tmp_path):
     path = write_key(tmp_path / "k.csv",
                      [("One", "1001", "HS-9", cycled(0))])
@@ -264,8 +319,7 @@ def test_key_template_round_trips(tmp_path):
     # Blank answers everywhere means nothing is scored yet, not that
     # everything is wrong.
     keys = answer_key.load(path)
-    assert all(key.score([set()] * QUESTIONS)[1] == 0
-               for key in keys.values())
+    assert all(key.score([set()] * QUESTIONS)[1] == 0 for key in keys)
 
 
 # --- end to end -----------------------------------------------------------
@@ -285,7 +339,7 @@ def test_reads_identity_and_answers(tmp_path):
     assert not result.unclear and not result.missing
 
 
-def test_scores_against_the_key_and_honours_exclusions(tmp_path):
+def test_scores_against_the_key_and_honours_allowed_levels(tmp_path):
     sheets = [
         ss.SheetData(student_id="04275", latin_level="HS-2",
                      test_ids=TEST_IDS,
@@ -301,10 +355,47 @@ def test_scores_against_the_key_and_honours_exclusions(tmp_path):
 
     assert by_student["04275"]["1001"].points == QUESTIONS
     assert by_student["04275"]["1002"].status == ""
-    # HS-Adv may not sit Reading Comprehension 1.
+    # HS-Adv is not among the levels allowed to take Reading Comprehension 1.
     assert by_student["00031"]["1002"].status == answer_key.TEST_NOT_ALLOWED
     assert by_student["00031"]["1002"].points is None
     assert by_student["00031"]["1003"].points == QUESTIONS
+
+
+def test_students_are_scored_against_the_key_for_their_own_level(tmp_path):
+    """One printed test, two keys. Each student meets only their own."""
+    key = write_key(tmp_path / "k.csv", [
+        ("Latin Literature", "1001", "", cycled(0)),
+        ("Reading Comp (lower)", "1002", "MS-1, MS-2, MS-3", cycled(1)),
+        ("Reading Comp (upper)", "1002", "HS-1, HS-2, HS-3, HS-Adv",
+         cycled(3)),
+        ("Mythology", "1003", "", cycled(2)),
+    ])
+    sheets = [
+        # The middle school student answers the lower key; the high school
+        # student answers the upper one. Both should score full marks.
+        ss.SheetData(student_id="04275", latin_level="MS-2",
+                     test_ids=TEST_IDS,
+                     answers=[cycled(0), cycled(1), cycled(2)]),
+        ss.SheetData(student_id="00031", latin_level="HS-2",
+                     test_ids=TEST_IDS,
+                     answers=[cycled(0), cycled(3), cycled(2)]),
+    ]
+    result, _ = grade(tmp_path, sheets, key=key)
+    rows = {(row.student_id, row.test_id): row for row in result.rows}
+
+    lower = rows[("04275", "1002")]
+    upper = rows[("00031", "1002")]
+    assert lower.points == QUESTIONS
+    assert upper.points == QUESTIONS
+    assert lower.test_name == "Reading Comp (lower)"
+    assert upper.test_name == "Reading Comp (upper)"
+
+    # The statistics keep the two apart, rather than pooling answers to
+    # questions that are not the same questions.
+    stats = read_csv(pipeline.resolve_batch_folder(tmp_path / "out", None) /
+                     pipeline.STATS_FILENAME)
+    names = {row[1] for row in stats[1:] if row[0] == "1002"}
+    assert names == {"Reading Comp (lower)", "Reading Comp (upper)"}
 
 
 def test_unknown_test_id_is_recorded_not_fatal(tmp_path):

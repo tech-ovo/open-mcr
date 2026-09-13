@@ -114,7 +114,7 @@ venv.bak/
 
 # The Apps Script file is authored once in tools/ and copied next to the
 # page by the deploy workflow, so the copy under site/ is generated.
-site/review_sheet.gs
+site/Sheet.gs
 
 # mypy
 .mypy_cache/

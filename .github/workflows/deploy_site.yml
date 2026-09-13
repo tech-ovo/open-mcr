@@ -15,7 +15,7 @@ on:
     branches: [master]
     paths:
       - 'site/**'
-      - 'tools/review_sheet.gs'
+      - 'tools/Sheet.gs'
       - '.github/workflows/deploy_site.yml'
   workflow_dispatch:
 
@@ -39,7 +39,7 @@ jobs:
         run: |
           mkdir -p _site
           cp -r site/. _site/
-          cp tools/review_sheet.gs _site/review_sheet.gs
+          cp tools/Sheet.gs _site/Sheet.gs
 
       - name: Set the custom domain
         if: vars.SITE_DOMAIN != ''

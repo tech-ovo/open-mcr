@@ -49,14 +49,14 @@ def auth():
 def key_csv(tests=None) -> bytes:
     tests = tests or [
         ("Latin Literature", "1001", "", cycled(0)),
-        ("Reading Comprehension 1", "1002", "HS-Adv", cycled(1)),
+        ("Reading Comprehension 1", "1002", "MS-1, MS-2, MS-3, HS-1, HS-2, HS-3", cycled(1)),
         ("Mythology", "1003", "", cycled(2)),
     ]
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow([answer_key.NAME_ROW] + [t[0] for t in tests])
     writer.writerow([answer_key.TEST_ID_ROW] + [t[1] for t in tests])
-    writer.writerow([answer_key.EXCLUDED_ROW] + [t[2] for t in tests])
+    writer.writerow([answer_key.ALLOWED_ROW] + [t[2] for t in tests])
     for number in range(1, QUESTIONS + 1):
         writer.writerow([str(number)] + [t[3][number - 1] for t in tests])
     return buffer.getvalue().encode("utf-8")
@@ -189,7 +189,7 @@ def test_grade_returns_results_and_keeps_nothing(client, tmp_path):
     assert not leftovers
 
 
-def test_grade_reports_an_excluded_level_without_failing(client, tmp_path):
+def test_grade_reports_a_disallowed_level_without_failing(client, tmp_path):
     scans = batch_pdf([one_student(student_id="00031",
                                    latin_level="HS-Adv")], tmp_path)
     response = client.post(
@@ -244,7 +244,7 @@ def test_grade_surfaces_unclear_marks(client, tmp_path):
 
 
 def test_grade_accepts_custom_levels_in_the_key(client, tmp_path):
-    """A renamed level must be accepted in the key's Excluded row and come
+    """A renamed level must be accepted in the key's Allowed row and come
     back in the results."""
     levels = ["Novice", "Int-1", "Int-2", "Adv-1", "Adv-2", "Adv-3", "Open"]
     sheet = one_student(latin_level=None)
@@ -253,7 +253,8 @@ def test_grade_accepts_custom_levels_in_the_key(client, tmp_path):
                          latin_level=layout.LATIN_LEVELS[4],
                          test_ids=TEST_IDS,
                          answers=[cycled(0), cycled(1), cycled(2)])
-    key = key_csv([("Latin Literature", "1001", "Adv-2", cycled(0)),
+    key = key_csv([("Latin Literature", "1001",
+                    "Novice, Int-1, Int-2, Adv-1, Adv-3, Open", cycled(0)),
                    ("Reading Comprehension 1", "1002", "", cycled(1)),
                    ("Mythology", "1003", "", cycled(2))])
     response = client.post(

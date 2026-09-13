@@ -5,9 +5,9 @@ further column is one test. With eighty questions that is far easier to edit
 than eighty columns across.
 
 ===========  ===================  =========================  ==============
-Name         Latin Literature     Reading Comprehension 1    Mythology
-Test ID      1001                 1002                       1003
-Excluded                          HS-Adv                     MS-1, MS-2
+Name         Latin Literature     Reading Comp (lower)       Reading Comp (upper)
+Test ID      1001                 1002                       1002
+Allowed                           MS-1, MS-2, MS-3           HS-1, HS-2, HS-3
 1            A                    D                          B
 2            C                    A                          B
 ...
@@ -15,8 +15,13 @@ Excluded                          HS-Adv                     MS-1, MS-2
 ===========  ===================  =========================  ==============
 
 ``Name`` is free text, for the reports. ``Test ID`` is the 4-digit number
-students bubble, and must be unique. ``Excluded`` lists Latin levels that may
-not sit that test, comma-separated; blank means everyone may.
+students take the test with. ``Allowed`` lists the Latin levels that may take
+it, comma-separated; blank means every level may.
+
+Two columns may share a Test ID when the levels that may take them do not
+overlap, as ``1002`` does above. That is how one printed test can be marked
+against different keys for different levels. Which key a student is scored
+against is then decided by the Latin level they bubbled.
 
 An answer cell says what a *correct sheet* looks like:
 
@@ -36,8 +41,14 @@ from . import sheet_layout as layout
 
 NAME_ROW = "Name"
 TEST_ID_ROW = "Test ID"
-EXCLUDED_ROW = "Excluded"
-REQUIRED_ROWS = (NAME_ROW, TEST_ID_ROW, EXCLUDED_ROW)
+ALLOWED_ROW = "Allowed"
+REQUIRED_ROWS = (NAME_ROW, TEST_ID_ROW, ALLOWED_ROW)
+
+#: The row this replaced. Meeting one means reading a file written for the old
+#: rules, where the levels listed were the ones that could *not* take the test.
+#: Loading it as though it said the opposite would silently score the wrong
+#: students, so it is refused instead.
+RETIRED_EXCLUDED_ROW = "Excluded"
 
 #: Separates alternative acceptable answers within one cell.
 ALTERNATIVE_SEPARATOR = "|"
@@ -49,8 +60,14 @@ VOID_ANSWER = "X"
 
 #: Written next to a score when the student's Test ID matches no key.
 TEST_NOT_FOUND = "TEST NOT FOUND"
-#: Written next to a score when the student's Latin level may not sit the test.
+#: Written next to a score when no key for that Test ID takes the student's
+#: Latin level.
 TEST_NOT_ALLOWED = "TEST NOT ALLOWED"
+#: Written next to a score when the Test ID has several keys, one per level,
+#: and the student's Latin level could not be read - so there is no way to say
+#: which of them applies. Filling the level in on the Missing sheet and
+#: re-scoring resolves it.
+LEVEL_NEEDED = "LATIN LEVEL NEEDED"
 
 
 class AnswerKeyError(ValueError):
@@ -62,13 +79,17 @@ class Key(tp.NamedTuple):
 
     name: str
     test_id: str
-    excluded_levels: tp.FrozenSet[str]
+    allowed_levels: tp.FrozenSet[str]
+    """The Latin levels that may take this test, upper-cased. Never empty: a
+    blank cell in the file is expanded to every level in use, so that overlap
+    between two keys sharing a Test ID is a plain set intersection."""
+
     answers: tp.Tuple[tp.Tuple[tp.FrozenSet[str], ...], ...]
     """Per question, the set of acceptable *complete* answers. An empty tuple
     means the question is not scored."""
 
     def allows(self, latin_level: str) -> bool:
-        return latin_level.strip().upper() not in self.excluded_levels
+        return latin_level.strip().upper() in self.allowed_levels
 
     def accepted_text(self, index: int) -> str:
         """How the key reads, for the reports: ``ABD`` or ``A|BD``."""
@@ -130,13 +151,15 @@ def _parse_answer_cell(cell: str, where: str
     return tuple(accepted)
 
 
-def _parse_excluded(cell: str, where: str,
-                    levels_in_use: tp.Sequence[str]) -> tp.FrozenSet[str]:
+def _parse_allowed(cell: str, where: str,
+                   levels_in_use: tp.Sequence[str]) -> tp.FrozenSet[str]:
+    known = {level.upper() for level in levels_in_use}
     levels = {
         part.strip().upper()
         for part in cell.replace(";", ",").split(",") if part.strip()
     }
-    known = {level.upper() for level in levels_in_use}
+    if not levels:
+        return frozenset(known)
     unknown = levels - known
     if unknown:
         raise AnswerKeyError(
@@ -145,10 +168,74 @@ def _parse_excluded(cell: str, where: str,
     return frozenset(levels)
 
 
+class KeySet:
+    """Every key in the file, looked up by Test ID and Latin level.
+
+    A Test ID usually has exactly one key. It may have several when they take
+    disjoint sets of Latin levels, which is how the same printed test can be
+    marked differently for, say, the middle school and high school entries.
+    """
+
+    def __init__(self, keys: tp.Sequence[Key]):
+        self._by_id: tp.Dict[str, tp.List[Key]] = {}
+        for key in keys:
+            self._by_id.setdefault(key.test_id, []).append(key)
+
+    def variants(self, test_id: str) -> tp.Tuple[Key, ...]:
+        """Every key sharing this Test ID, in file order."""
+        return tuple(self._by_id.get(test_id, ()))
+
+    def lookup(self, test_id: str,
+               latin_level: str) -> tp.Optional[Key]:
+        """The key that applies, or None if the level may not take the test.
+
+        With one key for the ID and no readable level, that key is returned:
+        there is nothing to choose between.
+        """
+        variants = self.variants(test_id)
+        if not variants:
+            return None
+        if not latin_level.strip():
+            return variants[0] if len(variants) == 1 else None
+        for key in variants:
+            if key.allows(latin_level):
+                return key
+        return None
+
+    def is_ambiguous(self, test_id: str, latin_level: str) -> bool:
+        """True when only the missing Latin level stands in the way."""
+        return not latin_level.strip() and len(self.variants(test_id)) > 1
+
+    def __getitem__(self, test_id: str) -> Key:
+        """The only key for this Test ID.
+
+        Raises if there are several, because choosing between them needs a
+        Latin level - use ``lookup`` there.
+        """
+        variants = self.variants(test_id)
+        if not variants:
+            raise KeyError(test_id)
+        if len(variants) > 1:
+            raise KeyError(
+                f"Test ID {test_id} has {len(variants)} keys, one per Latin "
+                "level; look it up with a level rather than on its own.")
+        return variants[0]
+
+    def __contains__(self, test_id: object) -> bool:
+        return test_id in self._by_id
+
+    def __len__(self) -> int:
+        return sum(len(group) for group in self._by_id.values())
+
+    def __iter__(self) -> tp.Iterator[Key]:
+        for test_id in sorted(self._by_id):
+            yield from self._by_id[test_id]
+
+
 def load(path: pathlib.Path,
          questions: int = layout.QUESTIONS_PER_TEST,
          latin_levels: tp.Optional[tp.Sequence[str]] = None
-         ) -> tp.Dict[str, Key]:
+         ) -> KeySet:
     """Read and validate the key file.
 
     Raises AnswerKeyError on anything that would make grading meaningless.
@@ -173,6 +260,14 @@ def load(path: pathlib.Path,
                 "Each row label must appear once.")
         rows[label] = [cell.strip() for cell in row[1:]]
 
+    if RETIRED_EXCLUDED_ROW in rows and ALLOWED_ROW not in rows:
+        raise AnswerKeyError(
+            f"The key file has an '{RETIRED_EXCLUDED_ROW}' row. That row was "
+            f"replaced by '{ALLOWED_ROW}', which lists the levels that *may* "
+            "take each test rather than the ones that may not. Rewrite the "
+            "row with the opposite meaning and rename it, so that a file is "
+            "never read as saying the reverse of what it says.")
+
     missing = [name for name in REQUIRED_ROWS if name not in rows]
     if missing:
         raise AnswerKeyError(
@@ -196,7 +291,7 @@ def load(path: pathlib.Path,
         values = rows[label]
         return values[column] if column < len(values) else ""
 
-    keys: tp.Dict[str, Key] = {}
+    keys: tp.List[Key] = []
     for column in range(width):
         test_id = cell(TEST_ID_ROW, column)
         name = cell(NAME_ROW, column)
@@ -215,27 +310,37 @@ def load(path: pathlib.Path,
                 f"{where}: Test ID '{test_id}' has {len(test_id)} digits, but "
                 f"the sheet has room for {layout.TEST_ID_DIGITS}.")
         test_id = test_id.zfill(layout.TEST_ID_DIGITS)
-        if test_id in keys:
-            raise AnswerKeyError(
-                f"{where}: Test ID {test_id} is used twice in the key file "
-                f"('{keys[test_id].name}' and '{name}'). Each test needs its "
-                "own ID or answers cannot be matched to students.")
+        allowed = _parse_allowed(cell(ALLOWED_ROW, column), where,
+                                 levels_in_use)
 
-        keys[test_id] = Key(
+        # Sharing a Test ID is allowed, but only while the keys cannot both
+        # apply to one student.
+        for earlier in keys:
+            if earlier.test_id != test_id:
+                continue
+            clash = earlier.allowed_levels & allowed
+            if clash:
+                raise AnswerKeyError(
+                    f"{where}: Test ID {test_id} is used twice in the key file "
+                    f"('{earlier.name}' and '{name or test_id}'), and both "
+                    f"allow {', '.join(sorted(clash))}. Two tests may share an "
+                    "ID only when the levels allowed to take them do not "
+                    "overlap, so that every student matches exactly one.")
+
+        keys.append(Key(
             name=name or f"Test {test_id}",
             test_id=test_id,
-            excluded_levels=_parse_excluded(cell(EXCLUDED_ROW, column),
-                                            where, levels_in_use),
+            allowed_levels=allowed,
             answers=tuple(
                 _parse_answer_cell(cell(str(number), column),
                                    f"{where} question {number}")
                 for number in range(1, questions + 1)),
-        )
+        ))
 
     if not keys:
         raise AnswerKeyError(
             f"The key file '{path.name}' has row labels but no tests.")
-    return keys
+    return KeySet(keys)
 
 
 def write_template(path: pathlib.Path,
@@ -246,7 +351,7 @@ def write_template(path: pathlib.Path,
         (NAME_ROW, ["Latin Literature", "Reading Comprehension 1",
                     "Mythology"]),
         (TEST_ID_ROW, ["1001", "1002", "1003"]),
-        (EXCLUDED_ROW, ["", "HS-Adv", "MS-1, MS-2"]),
+        (ALLOWED_ROW, ["", "MS-1, MS-2, MS-3", ""]),
     ]
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)

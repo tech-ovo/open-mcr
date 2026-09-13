@@ -37,14 +37,14 @@ answer sheet.
 |---|---|
 | **A two-page CAJCL sheet** | Three 80-question tests (240 questions) on one double-sided sheet, set in Times, with the CAJCL emblem in grayscale at the foot of the front page. |
 | **Five-digit Student ID** | Bubbled in the same five columns on **both** sides, so a back page that gets separated can still be matched to its front. |
-| **Latin level as bubbles** | MS-1, MS-2, MS-3, HS-1, HS-2, HS-3, HS-Adv. |
+| **Latin level as bubbles** | MS-1, MS-2, MS-3, HS-1, HS-2, HS-3, HS-Adv. Renaming them is free; the count is a code change (see below). |
 | **Directions on the sheet** | Printed on the front page. |
 | **Front/back markers** | A machine-readable page-code bubble and a solid collation bar along the bottom - left on the front, right on the back. |
 | **Batch folders** | `--batch 3` reads `<input>/Batch 3` and writes `<output>/Batch 3`, and names the review sheets after the batch. |
 | **Batch splitting** | Scan ten students as one twenty-page PDF; it is split into ten sheets automatically, and mis-collated pages stop the run. |
 | **Calibrated thresholds** | The filled/blank cutoff is measured from the scans themselves, once per PDF, so a different scanner needs no retuning. Printed to `Calibration.txt` and overridable with `--threshold`. |
 | **A plain cutoff, so `AB` is readable** | A bubble is filled when it is dark enough - never "the darkest of the five" - so a student who means A *and* B is read as `AB`. |
-| **Answer keys as a CSV** | One row per test, with a Test ID, the Latin levels excluded from it, and 80 answers. A cell may list alternatives (`ABD`). |
+| **Answer keys as a CSV** | One row per field, one column per test: a Test ID, the Latin levels allowed to take it, and 80 answers. Two tests may share an ID when their levels do not overlap. |
 | **Review as a spreadsheet** | Anything too faint to call goes to `Unclear.csv` with a checkbox per option; anything required but blank goes to `Missing.csv`. Correct them in Google Sheets and feed them back. |
 | **Regrade without rescanning** | `--regrade` re-scores an existing `Results.csv` against a corrected key or corrected review sheets. |
 | **Question statistics** | `Question Stats.csv` gives per-question counts and percent correct. |
@@ -114,9 +114,9 @@ further column is one test. With eighty questions that is far easier to edit
 than eighty columns across.
 
 ```csv
-Name,Latin Literature,Reading Comprehension 1,Mythology
-Test ID,1001,1002,1003
-Excluded,,HS-Adv,"MS-1, MS-2"
+Name,Latin Literature,Reading Comp (lower),Reading Comp (upper)
+Test ID,1001,1002,1002
+Allowed,,"MS-1, MS-2, MS-3","HS-1, HS-2, HS-3, HS-Adv"
 1,A,D,B
 2,C,A,B
 ...
@@ -126,9 +126,22 @@ Excluded,,HS-Adv,"MS-1, MS-2"
 | Row | Meaning |
 |---|---|
 | `Name` | What the test is called, for the reports. Free text. |
-| `Test ID` | The 4-digit number students bubble. **Must be unique.** |
-| `Excluded` | Latin levels that may not sit this test, comma-separated. Blank if everyone may. |
+| `Test ID` | The 4-digit number students bubble. |
+| `Allowed` | Latin levels that may take this test, comma-separated. Blank means every level. |
 | `1` ... `80` | The correct answer to each question. |
+
+### One test, two keys
+
+Two columns may share a Test ID when the levels they accept do not overlap, as
+`1002` does above. That is how one printed test can be marked against a
+different key for, say, the middle school and high school entries: the Latin
+level the student bubbled decides which key they are scored against.
+
+The levels have to be disjoint, so that every student matches exactly one key —
+two columns that both accept HS-1, or a column with a blank `Allowed` beside
+any other column with the same ID, stop the run. If a Test ID has several keys
+and a student's Latin level cannot be read, that row is marked `LATIN LEVEL NEEDED` rather than guessed at; filling the level in on the Missing sheet and
+re-scoring resolves it.
 
 An answer cell says what a **correct sheet looks like**:
 
@@ -165,7 +178,10 @@ Two things are **not** breaking, and are recorded per row in `Results.csv`
 instead:
 
 - `TEST NOT FOUND` - the student bubbled a Test ID that is not in the key;
-- `TEST NOT ALLOWED` - the student's Latin level is excluded from that test.
+- `TEST NOT ALLOWED` - no key for that Test ID accepts the student's Latin
+  level;
+- `LATIN LEVEL NEEDED` - that Test ID has one key per level and the student's
+  level could not be read, so there is no way to say which applies.
 
 ## Installing
 
@@ -425,10 +441,10 @@ would defeat the point of asking — so the run stops and names the rows.
 #### Working on it in Google Sheets
 
 A plain CSV has no checkboxes, so this repository ships an Apps Script that
-adds them on import: **[`tools/review_sheet.gs`](tools/review_sheet.gs)**.
+adds them on import: **[`tools/Sheet.gs`](tools/Sheet.gs)**.
 
 1. Make a Google Sheet you will reuse for every batch.
-2. **Extensions → Apps Script**, paste in `tools/review_sheet.gs`, Save.
+2. **Extensions → Apps Script**, paste in `tools/Sheet.gs`, Save.
 3. Click the **Triggers** (clock) icon → **Add Trigger**:
    function `onSpreadsheetChange`, source *From spreadsheet*, type *On change*.
    Save and accept the authorisation prompt.
@@ -577,6 +593,8 @@ The service is a FastAPI app in `server/grading_api.py`, deployed on
 [Modal](https://modal.com). It is gated by a shared passphrase, which the
 website sends as an `X-Grading-Key` header.
 
+**First time:**
+
 ```sh
 pip install modal
 modal setup
@@ -590,15 +608,29 @@ modal deploy server/grading_api.py
 Modal prints the endpoint URL. That URL and the passphrase are the two things an
 operator types into step 1.
 
-To rotate the passphrase, create the secret again with a new value and redeploy.
-Anyone still on the old one gets *"The server did not accept that passphrase."*
+**Every time after that** — whenever anything under `src/` or `server/` changes,
+including the sheet layout, the key rules or the thresholds:
+
+```sh
+modal deploy server/grading_api.py
+```
+
+That is the whole redeploy. It replaces the running app in place, so the
+endpoint URL does not change and nobody has to be told anything. `src/` is
+copied into the image at deploy time, so a code change that is not redeployed
+is simply not live. The website is a separate deploy: it goes out by itself on
+push, and needs nothing from you.
+
+To rotate the passphrase, create the secret again with a new value and
+redeploy. Anyone still on the old one gets *"The server did not accept that
+passphrase."*
 
 ### Deploying the website
 
 The site is `site/` — one HTML file, one JavaScript file, no build step and no
 dependencies. Any static host will serve it. `.github/workflows/deploy_site.yml`
 publishes it to GitHub Pages on every push that touches `site/`, and copies
-`tools/review_sheet.gs` in alongside it so step 7 can link to the Apps Script.
+`tools/Sheet.gs` in alongside it so step 7 can link to the Apps Script.
 
 For a custom domain such as `grade.uhsjcl.org`, set a repository variable named
 `SITE_DOMAIN` to that host and point a `CNAME` record at `<owner>.github.io`.
@@ -614,7 +646,7 @@ domain.
 |---|---|
 | **1. Connect** | Endpoint and passphrase. The page asks the server how the sheet is laid out — how many tests, questions, Student ID digits and Latin levels — so the rest of the form matches the real sheet rather than a hardcoded copy of it. |
 | **2. Design and print the answer sheet** | The title, the directions, the seven Latin level names and the write-in labels, as text boxes. Generates the printable PDF. Wording only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
-| **3. List the tests** | A row per test — name, Test ID, which Latin levels may not sit it. Test IDs are zero-padded to four digits when you leave the box. |
+| **3. List the tests** | A row per test — name, Test ID, and which Latin levels may take it. Test IDs are zero-padded to four digits when you leave the box, and two tests may share an ID when their levels do not overlap. |
 | **4. Enter the answers** | Three ways into the same data, and you can mix them: download the template and fill it in a spreadsheet, paste a whole test's answers at once, or type into the grid of every question. `Keys.csv` is offered back whenever it holds work that is not already in a file you have. Uploading merges by Test ID rather than replacing, and there is an Undo. |
 | **5. Thresholds** | Automatic per batch. Tick the override to pin the four numbers, individually or together, exactly as `--threshold` does. |
 | **6. Scan and grade** | The scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. |
@@ -668,11 +700,21 @@ If you need to change the sheet, these are the files that matter:
 | `src/pipeline.py` | Runs the whole thing and writes the output files. |
 | `src/annotation.py` | Draws the marked-up PDFs. |
 | `src/console.py` | The progress output. |
-| `tools/review_sheet.gs` | Google Apps Script that formats an imported review CSV. |
+| `tools/Sheet.gs` | Google Apps Script that formats an imported review CSV. |
 | `server/grading_api.py` | The hosted service — the same pipeline behind an HTTP endpoint. |
 | `site/` | The one-page website that drives it. |
 
 Because the generator and the reader both derive from `sheet_layout.py`, moving a block is a one-line change in one file — and `test/test_cajcl.py` fails if the two ever disagree.
+
+**Renaming a Latin level is free; changing how many there are is a code
+change.** `sheet_layout.LATIN_LEVELS` is the one list: the generator prints a
+bubble per entry and `grid_info` reads a bubble per entry, so editing that
+tuple moves both together. The block grows downward from
+`LATIN_LEVEL_FIRST_ROW` and the write-in lines start at row 21.6, so up to
+about 14 levels fit before anything else has to move. Everything beyond the
+count — the names — can be set per run, from `--layout` or from the website,
+and the server refuses a list of the wrong length rather than printing a sheet
+its own reader cannot parse.
 
 **Keep every bubble at the same outline weight.** The reader measures a disc
 slightly smaller than the printed circle, so a heavier ring spills into that

@@ -172,6 +172,18 @@
                        background: transparent; }
   .answer-grid input:hover { border-color: var(--line); }
   .answer-grid input.edited { color: var(--accent); font-weight: 700; }
+  .answer-grid td + td, .answer-grid th + th { border-left: 1px solid var(--line-soft); }
+
+  /* Methods B and C: shut unless wanted. */
+  details.method { border: 1px solid var(--line); border-radius: 8px;
+                   margin: 0 0 .6rem; }
+  details.method > summary { cursor: pointer; padding: .5rem .75rem;
+                             font: 600 .82rem var(--sans);
+                             text-transform: uppercase; letter-spacing: .07em;
+                             color: var(--ink-faint); }
+  details.method > summary:hover { color: var(--accent); }
+  details.method[open] > summary { border-bottom: 1px solid var(--line-soft); }
+  details.method .body { padding: .85rem .9rem; }
 
   .batch { border: 1px solid var(--line); border-radius: 8px;
            padding: .8rem .9rem; margin-bottom: .8rem; }
@@ -236,15 +248,14 @@
   <p>
     Free open-source exam grading for convention or classroom use: build the
     answer sheet, write the key, print and scan, grade, and fix unclear marks.
-    Your work is kept in this browser only. Scans are sent to the grading
-    server, processed, returned, and discarded.
   </p>
 </header>
 
 <section class="intro">
   <h2>How this works</h2>
   <ol>
-    <li><strong>Connect</strong> to the grading server. Once per browser.</li>
+    <li><strong>Connect</strong> to the grading server. Both values are
+      saved, so you only do this once per browser.</li>
     <li><strong>Design and print the answer sheet.</strong> Do this first: the
       sheet itself does not depend on the tests or the answers.</li>
     <li><strong>List the tests and enter the answer keys.</strong> This can wait
@@ -267,14 +278,13 @@
     <span class="title">Connect to the grading server</span>
     <span class="hint" id="hint-connect">Not connected</span></summary>
   <div class="body">
-    <p class="note">Both values are saved, so you only do this once per
-      browser.</p>
+    <p class="note">Ask whoever set the server up.</p>
     <div class="grid2">
       <label><span class="lab">Server address</span>
         <span class="sub">The Modal endpoint, ending in <code>.modal.run</code></span>
         <input type="text" id="endpoint" placeholder="https://yourname--jcl-grading-api.modal.run" autocomplete="off" spellcheck="false"></label>
       <label><span class="lab">Passphrase</span>
-        <span class="sub">Ask whoever set the server up</span>
+        <span class="sub">Do not share publicly</span>
         <input type="password" id="passphrase" autocomplete="off"></label>
     </div>
     <div class="row">
@@ -318,9 +328,7 @@
     <h3>Printing</h3>
     <ul class="note">
       <li>Print <strong>double-sided</strong> (your printer may call this
-        <em>duplex</em>). <strong>Long-edge binding</strong> is the usual
-        choice; short-edge works too, because the reader corrects a page that
-        comes through upside down.</li>
+        <em>duplex</em>).</li>
       <li>Use <strong>100% scale</strong> if possible. "Fit to page" is
         acceptable if your printer requires it, but it makes the bubbles
         smaller.</li>
@@ -336,12 +344,15 @@
     <span class="hint" id="hint-tests">No tests yet</span></summary>
   <div class="body">
     <p class="note">
-      One row per test. <strong>Test ID:</strong> a unique 4-digit number for
-      this test. Print this number on the test booklet. Students bubble the
+      One row per test. <strong>Test ID:</strong> the 4-digit number for this
+      test. Print this number on the test booklet. Students bubble the
       same number on their answer sheets. The numbers must match.
     </p>
     <p class="note">
-      Leave the exclusions empty if anyone may take the test.
+      <strong>Levels:</strong> who may take the test. Leave every level ticked
+      if there is no restriction. Two tests may share a Test ID as long as the
+      levels they accept do not overlap — that is how one printed test can be
+      marked against a different key for, say, middle and high school.
     </p>
 
     <div class="scroll">
@@ -349,7 +360,7 @@
         <thead><tr>
           <th style="min-width:12rem">Test name</th>
           <th style="width:7rem">Test&nbsp;ID</th>
-          <th>Levels that may <em>not</em> take it</th>
+          <th>Levels that may take it</th>
           <th style="width:2.5rem"></th>
         </tr></thead>
         <tbody></tbody>
@@ -389,23 +400,31 @@
     </p>
     <div id="answers"></div>
 
-    <h3>B. Upload a spreadsheet</h3>
-    <p class="note">
-      Download the template, type the answers into the numbered rows in Excel
-      or Google Sheets, then bring the file back.
-    </p>
-    <div class="row">
-      <button id="download-template">Download template</button>
-      <span class="picker" id="pick-key"></span>
-      <button id="undo-key" hidden>Undo upload</button>
-    </div>
+    <details class="method">
+      <summary>B. Upload a spreadsheet</summary>
+      <div class="body">
+        <p class="note">
+          Download the template, type the answers into the numbered rows in
+          Excel or Google Sheets, then bring the file back.
+        </p>
+        <div class="row">
+          <button class="primary" id="download-template">Download template</button>
+          <span class="picker" id="pick-key"></span>
+          <button id="undo-key" hidden>Undo upload</button>
+        </div>
+      </div>
+    </details>
 
-    <h3>C. Edit the grid</h3>
-    <p class="note">
-      Every answer is editable here, however it got in. A cell you have typed
-      into is shown in <strong>bold</strong>.
-    </p>
-    <div class="answer-grid" id="answer-grid"></div>
+    <details class="method">
+      <summary>C. Edit the grid</summary>
+      <div class="body">
+        <p class="note">
+          Every answer is editable here, however it got in. A cell you have
+          typed into is shown in <strong>bold</strong>.
+        </p>
+        <div class="answer-grid" id="answer-grid"></div>
+      </div>
+    </details>
 
     <h3>What goes in a cell</h3>
     <table class="cells">
@@ -444,9 +463,9 @@
             no limit on how many you list.</li>
           <li><strong>A repeated letter is an error.</strong> <code>AA</code> is
             rejected, as is a stray <code>|</code> such as <code>A|</code>, and
-            any letter outside A&ndash;E. These stop the run rather than grade
-            against a key that cannot mean what it says, so they are caught
-            here before you upload any scans.</li>
+            any letter outside A&ndash;E. This step flags them as you type,
+            and the server would refuse them too rather than grade against a
+            key that cannot mean what it says.</li>
           <li><strong>You can mix the three methods.</strong> They all write to
             the same answers &mdash; paste a test, then correct one cell in the
             grid, then upload a spreadsheet for a fourth test. Most people will
@@ -456,10 +475,9 @@
             anything else is added. Tests not mentioned in the file are left
             alone, and <strong>Undo upload</strong> puts everything back.</li>
           <li><strong>The file is <code>Keys.csv</code>.</strong> The field
-            names run down the first column (Name, Test ID, Excluded, then 1 to
-            <span class="q-count">80</span>) with one further column per test.
-            It is the same file the command-line version takes with
-            <code>--key</code>.</li>
+            names run down the first column (Name, Test ID, Allowed, then 1 to
+            <span class="q-count">80</span>) with one further column per
+            test.</li>
         </ul>
       </div>
     </details>
@@ -485,11 +503,9 @@
       goes to step 7 for a person to decide. Anything fainter is ignored.
     </p>
     <p class="note">
-      Where those two lines fall depends on the scanner, the paper and how hard
-      the students pressed, so the server measures them from each batch of
-      scans rather than using fixed numbers. There is a pair for the answer
-      bubbles and a pair for the ID bubbles. You should not need to touch any
-      of this.
+      Where those two lines fall depends on the scanner, the paper and how
+      hard the students pressed, so the server measures them from each batch of
+      scans rather than using fixed numbers.
     </p>
     <label class="inline">
       <input type="checkbox" id="thr-override"> Override thresholds (not recommended)
@@ -544,35 +560,25 @@
         the page itself and corrects one that comes through sideways or upside
         down, so neither setting will break a batch.</li>
       <li>Save one PDF per batch of about
-        <strong><span id="suggest-sheets">25</span> sheets</strong>. Your
-        scanner can usually do this for you — set it to start a new file every
-        <span id="suggest-pages">50</span> pages.</li>
+        <strong><span id="suggest-sheets">25</span> sheets</strong> — your
+        scanner can usually start a new file every
+        <span id="suggest-pages">50</span> pages for you. This keeps each
+        upload small enough for the server to handle; the hard limit is
+        <span id="limit-mb">40</span> MB. If a scan is too big, break it into
+        smaller pieces and add each as its own batch.</li>
     </ul>
-
-    <h3>How big a batch</h3>
-    <p class="note" id="limit-note"></p>
-    <p class="note">
-      The megabytes are the real limit; 25 sheets is just what that usually
-      works out to. At 300 dpi grayscale a page is roughly half a megabyte, so
-      25 sheets — 50 pages — lands near 25 MB, comfortably inside. Color, or
-      600 dpi, is several times larger, and fewer sheets will fit. This page
-      checks the size before it uploads and tells you if it is too big, so you
-      can scan in smaller pieces and add each as its own batch.
-    </p>
 
     <h3>Grading</h3>
     <p class="note">
-      One batch per PDF. Each is graded on its own and keeps its own results,
-      so you can start grading the first stack while the rest is still being
-      scanned.
+      A <strong>batch</strong> is one PDF from the scanner, holding whole
+      sheets. Each is graded on its own and keeps its own results, so you can
+      start grading the first stack while the rest is still being scanned.
     </p>
     <p class="note">
-      A batch cannot be re-graded once it is done, but that is rarely what you
-      want anyway. <strong>If something was read wrong or the key was wrong,
-      fix it in step 7</strong> — that re-scores the batch from the results it
-      already has, without re-reading the scans. Only if the paper itself needs
-      re-reading (a page was missing, or the scan was bad) do you need to scan
-      again and <strong>add it as a new batch</strong>.
+      A batch cannot be re-graded. If a mark was read wrong or the key was
+      wrong, fix it in step 7: that re-scores from the results already here,
+      without re-reading the scans. If the paper itself needs re-reading, scan
+      it again and add it as a new batch.
     </p>
     <div class="row" style="margin-bottom:.8rem">
       <button id="add-batch">Add a batch</button>
@@ -624,7 +630,7 @@
       <li>Make a Google Sheet you will reuse for the whole event, and share
         it with whoever is helping.</li>
       <li><strong>Extensions → Apps Script</strong>, paste in
-        <a href="review_sheet.gs" download>review_sheet.gs</a>, and Save.</li>
+        <a href="Sheet.gs" download>Sheet.gs</a>, and Save.</li>
       <li>Click the <strong>Triggers</strong> (clock) icon →
         <strong>Add Trigger</strong>: function
         <code>onSpreadsheetChange</code>, source <em>From spreadsheet</em>,
@@ -648,8 +654,7 @@
 <footer>
   <p>
     <a href="https://github.com/ovo-amo/open-mcr">Source code and the
-    command-line version</a>. Licensed under the GPL v3, with no warranty:
-    grades are at stake, so check the results.
+    command-line version</a>. Licensed under the GPL v3, with no warranty.
   </p>
   <div class="row">
     <button id="reset" class="danger">Reset</button>

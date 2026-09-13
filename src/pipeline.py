@@ -54,6 +54,10 @@ class TestRow:
 
     test_name: str = ""
     status: str = STATUS_OK
+    key: tp.Optional[keys_module.Key] = None
+    """The key this row was scored against. Not written to Results.csv; it is
+    here so the question statistics can group by the key actually used, which
+    matters once one Test ID can carry several."""
     points: tp.Optional[int] = None
     out_of: tp.Optional[int] = None
     per_question: tp.List[str] = dataclasses.field(default_factory=list)
@@ -77,20 +81,28 @@ def _text_to_marks(text: str) -> tp.Set[str]:
 
 
 def score_rows(rows: tp.Sequence[TestRow],
-               keys: tp.Optional[tp.Dict[str, keys_module.Key]]) -> None:
+               keys: tp.Optional[keys_module.KeySet]) -> None:
     """Fill in each row's score, in place."""
     for row in rows:
+        row.key = None
         if keys is None:
             row.status = STATUS_NEEDS_REVIEW if row.needs_review else STATUS_OK
             continue
-        key = keys.get(row.test_id)
-        if key is None:
+        variants = keys.variants(row.test_id)
+        if not variants:
             row.status = keys_module.TEST_NOT_FOUND
             continue
-        row.test_name = key.name
-        if row.latin_level and not key.allows(row.latin_level):
-            row.status = keys_module.TEST_NOT_ALLOWED
+        key = keys.lookup(row.test_id, row.latin_level)
+        if key is None:
+            # Several keys share this ID and the level that would choose
+            # between them is unreadable, or no key takes this level at all.
+            row.test_name = variants[0].name if len(variants) == 1 else ""
+            row.status = (keys_module.LEVEL_NEEDED
+                          if keys.is_ambiguous(row.test_id, row.latin_level)
+                          else keys_module.TEST_NOT_ALLOWED)
             continue
+        row.key = key
+        row.test_name = key.name
         points, out_of, detail = key.score(row.marked)
         row.points, row.out_of, row.per_question = points, out_of, detail
         row.status = STATUS_NEEDS_REVIEW if row.needs_review else STATUS_OK
@@ -172,26 +184,34 @@ def read_results(path: pathlib.Path,
 
 
 def write_question_stats(path: pathlib.Path, rows: tp.Sequence[TestRow],
-                         keys: tp.Optional[tp.Dict[str, keys_module.Key]],
+                         keys: tp.Optional[keys_module.KeySet],
                          questions: int) -> pathlib.Path:
-    """How each question behaved, across everyone who sat it."""
+    """How each question behaved, across everyone who took it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    by_test: tp.Dict[str, tp.List[TestRow]] = {}
+    # Grouped by the key each row was scored against, not by Test ID: two keys
+    # may share an ID, and their questions are different questions.
+    by_key: tp.Dict[tp.Tuple[str, str], tp.List[TestRow]] = {}
+    order: tp.List[tp.Tuple[str, str]] = []
     for row in rows:
         if row.status in (keys_module.TEST_NOT_FOUND,
-                          keys_module.TEST_NOT_ALLOWED):
+                          keys_module.TEST_NOT_ALLOWED,
+                          keys_module.LEVEL_NEEDED):
             continue
-        by_test.setdefault(row.test_id, []).append(row)
+        handle_key = (row.test_id, row.key.name if row.key else "")
+        if handle_key not in by_key:
+            by_key[handle_key] = []
+            order.append(handle_key)
+        by_key[handle_key].append(row)
 
     header = (["Test ID", "Test Name", "Question", "Key"] +
               list(layout.OPTIONS) + ["Correct", "Incorrect", "Blank"])
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(header)
-        for test_id in sorted(by_test):
-            group = by_test[test_id]
-            key = keys.get(test_id) if keys else None
-            name = key.name if key else ""
+        for handle_key in sorted(order):
+            test_id, name = handle_key
+            group = by_key[handle_key]
+            key = group[0].key
             for index in range(questions):
                 counts = {option: 0 for option in layout.OPTIONS}
                 blank = correct = incorrect = 0

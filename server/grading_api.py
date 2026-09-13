@@ -126,6 +126,7 @@ def _summarise(result, thresholds_note: str) -> tp.Dict[str, tp.Any]:
         "thresholds_note": thresholds_note,
         "test_not_found": statuses.get(keys_module.TEST_NOT_FOUND, 0),
         "test_not_allowed": statuses.get(keys_module.TEST_NOT_ALLOWED, 0),
+        "level_needed": statuses.get(keys_module.LEVEL_NEEDED, 0),
     }
 
 
