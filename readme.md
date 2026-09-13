@@ -664,8 +664,8 @@ domain.
 | **2. Design and print the answer sheet** | The title, the directions, the write-in labels, and the Latin levels — rename them, or add and remove them between 2 and 10. Generates the printable PDF. Wording only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
 | **3. List the tests** | A row per test — name, Test ID, and which Latin levels may take it. Test IDs are zero-padded to four digits when you leave the box, and two tests may share an ID when their levels do not overlap. |
 | **4. Enter the answers** | Three ways into the same data, and you can mix them: download the template and fill it in a spreadsheet, paste a whole test's answers at once, or type into the grid of every question. `Keys.csv` is offered back whenever it holds work that is not already in a file you have. Uploading merges by Test ID rather than replacing, and there is an Undo. |
-| **5. Thresholds** | Automatic per batch. Tick the override to pin the four numbers, individually or together, exactly as `--threshold` does. |
-| **6. Scan and grade** | Which tests to grade, the scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. |
+| **5. Advanced** | The per-run choices, all of them optional: which tests to grade, whether to produce marked-up scans, and the thresholds (automatic per batch; tick the override to pin the four numbers, individually or together, exactly as `--threshold` does). The step summary says what has been changed away from the defaults. |
+| **6. Scan and grade** | The scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. |
 | **7. Fix unclear marks** | `Unclear.csv` and `Missing.csv` per batch, the upload that feeds the corrections back and re-scores without the scans, and the optional Apps Script for people who would rather work in Google Sheets. |
 
 ### Batch size
@@ -683,15 +683,23 @@ worse place for it than the scanner's own document feeder.
 
 ### Invite links
 
-**Copy an invite link** in step 1 builds a URL that sets up the page for
-whoever opens it: the server address, the passphrase, your sheet wording
-(title, Latin levels, write-in lines, directions), any pinned thresholds, and
-which tests to grade. Only the parts you have actually changed travel, so a
-link stays short when nothing is customised.
+There are two, because they are for different things.
 
-It deliberately does **not** carry your tests, answer keys or results. Those
-would make the link unwieldy, and `Keys.csv` is already a file made to be
-passed around. The details ride in the URL *fragment*,
+**Copy an invite link** in step 1 carries the server address and the
+passphrase, and nothing else. It is what you send someone so they can reach
+the server at all.
+
+**Copy a link with this design** at the foot of step 2 carries those *plus*
+everything on that page — the title, the Latin levels, the write-in lines, the
+directions — and the advanced settings from step 5. This is the one to send
+once you have changed the sheet, because **anyone grading those sheets needs
+the same design**: the reader's grid is derived from it, so a helper working
+from the stock wording would read a differently-shaped sheet. Only the parts
+that actually differ from the server's defaults travel, so the link stays short
+when nothing is customised.
+
+Neither carries your tests, answer keys or results. Those would make the link
+unwieldy, and `Keys.csv` is already a file made to be passed around. The details ride in the URL *fragment*,
 which browsers never send to a web server, and the page wipes it from the
 address bar as soon as it has read it - so it does not linger in the guest's
 history.
@@ -755,6 +763,15 @@ and a tight printer margin. Raising it means checking that clearance again.
 A sheet printed with one set of levels must be graded with the same set —
 `RunOptions.sheet_text` carries them into the run, and the reader's grid is
 derived from it.
+
+**The Student ID block starts at a sub-column boundary.** Answer sub-columns
+begin at grid columns 1, 7, 13 and 19 — a six-column rhythm of one
+question-number cell followed by five option bubbles. `STUDENT_ID_COLUMN` is 7
+so that its five digits sit over five option columns rather than straddling a
+number cell, which lines the block up with the answers beside it. Moving it is
+safe as long as it lands on one of those boundaries and leaves room for
+`STUDENT_ID_DIGITS` columns; the generator and the reader both take it from the
+one constant.
 
 **Keep every bubble at the same outline weight.** The reader measures a disc
 slightly smaller than the printed circle, so a heavier ring spills into that

@@ -82,7 +82,12 @@ BUBBLES_PER_DIGIT = 10
 
 #: The Student ID block occupies the same columns and rows on *both* pages so
 #: that a loose back page can still be matched to its front page.
-STUDENT_ID_COLUMN = 6
+#:
+#: Answer sub-columns begin at 1, 7, 13 and 19 - a six-column rhythm of one
+#: question-number cell followed by five option bubbles. Starting the five ID
+#: digits at 7 rather than 6 puts them over five option columns instead of
+#: straddling a number cell, so the block lines up with the answers beside it.
+STUDENT_ID_COLUMN = 7
 
 # --- Latin level (front page only) ---------------------------------------
 

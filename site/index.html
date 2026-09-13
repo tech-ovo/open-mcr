@@ -80,6 +80,13 @@
   .body { padding: 1.1rem 1.15rem 1.15rem; }
   .body > :first-child { margin-top: 0; }
   .body > :last-child { margin-bottom: 0; }
+  /* Placeholders sit inside a wrapper, so the rule above does not reach them
+     and they leave a gap at the foot of the step. */
+  .body > div > p:last-child, details.tech .body > ul:last-child {
+    margin-bottom: 0;
+  }
+  /* A row whose only button is hidden still claims its top margin. */
+  .row:empty, .row.empty { display: none; }
 
   h3 { font: 600 .82rem var(--sans); margin: 1.4rem 0 .5rem;
        text-transform: uppercase; letter-spacing: .07em; color: var(--ink-faint); }
@@ -263,12 +270,13 @@
 <section class="intro">
   <h2>How this works</h2>
   <ol>
-    <li><strong>Connect</strong> to the grading server. Both values are
-      saved, so you only do this once per browser.</li>
-    <li><strong>Design and print the answer sheet.</strong> Do this first: the
-      sheet itself does not depend on the tests or the answers.</li>
-    <li><strong>List the tests and enter the answer keys.</strong> This can wait
-      until after the exam if you would rather.</li>
+    <li><strong>Connect</strong> to the grading server. You only do this once
+      per browser.</li>
+    <li><strong>Design and print</strong> the answer sheet.</li>
+    <li><strong>List the tests</strong> that go on it.</li>
+    <li><strong>Enter the answer keys.</strong> This can wait until after the
+      exam if you would rather.</li>
+    <li><strong>Advanced</strong> settings, which most people can skip.</li>
     <li><strong>Scan the completed sheets</strong> and upload them here.</li>
     <li><strong>Fix anything unclear</strong>, and download the results.</li>
   </ol>
@@ -300,11 +308,11 @@
       <button id="invite">Copy an invite link</button>
     </div>
     <p class="note">
-      An invite link carries the server details and your sheet wording, so
-      whoever opens it starts where you are. It does not carry your tests,
-      answers or results. <strong>The passphrase is inside the link</strong> —
-      anyone who has it can grade, so send it the way you would send the
-      passphrase itself, and not somewhere public.
+      An invite link fills these two boxes in for whoever opens it.
+      <strong>The passphrase is inside the link</strong> — anyone who has it can
+      grade, so send it the way you would send the passphrase itself, and not
+      somewhere public. Step 2 has a second button that adds your sheet design
+      to the link.
     </p>
     <div class="msg" id="msg-connect"></div>
   </div>
@@ -317,13 +325,8 @@
     <span class="hint" id="hint-sheet">Default wording</span></summary>
   <div class="body">
     <p class="note">
-      You can change the wording, and how many Latin levels there are. The
-      bubbles, corner marks, and the grid itself are fixed.
-    </p>
-    <p class="note">
-      <strong>Reprint the sheet after any change here.</strong> The reader
-      works from these settings, so a stack printed from an older version will
-      not line up with them.
+      You can change the wording and Latin levels. The
+      bubbles and corner marks are fixed. <strong>Reprint after any change.</strong>
     </p>
     <label><span class="lab">Title across the top</span>
       <input type="text" id="sheet-title" maxlength="46"></label>
@@ -342,9 +345,8 @@
 
     <h3 id="h-writeins">Write-in lines</h3>
     <p class="note" id="writein-note">
-      Ruled lines for students to write on by hand. Nothing written on them is
-      read by the software — only the bubbles are. They are there so a sheet
-      can be matched to a person if the Student ID goes wrong.
+      These are not read by the software — only the bubbles are. They exist
+      in case the Student ID goes wrong.
     </p>
     <div class="grid2" id="writeins"></div>
 
@@ -357,7 +359,14 @@
     <div class="row">
       <button class="primary" id="make-sheet">Generate PDF</button>
       <button id="reset-sheet">Reset wording</button>
+      <button id="invite-sheet">Copy a link with this design</button>
     </div>
+    <p class="note">
+      That link is the step 1 invite plus everything on this page. Anyone
+      grading these sheets <strong>needs the same design</strong>, because the
+      reader works from it — so send this one rather than the plain invite once
+      you have changed anything here.
+    </p>
     <div class="msg" id="msg-sheet"></div>
 
     <h3>Printing</h3>
@@ -379,15 +388,12 @@
     <span class="hint" id="hint-tests">No tests yet</span></summary>
   <div class="body">
     <p class="note">
-      One row per test. <strong>Test ID:</strong> the 4-digit number for this
-      test. Print this number on the test booklet. Students bubble the
-      same number on their answer sheets. The numbers must match.
+      <strong>Test ID:</strong> the 4-digit number for this
+      test. Print this number on the test booklet.
     </p>
     <p class="note">
-      <strong>Levels:</strong> who may take the test. Leave every level ticked
-      if there is no restriction. Two tests may share a Test ID as long as the
-      levels they accept do not overlap — that is how one printed test can be
-      marked against a different key for, say, middle and high school.
+      <strong>Levels:</strong> who may take the test. Two tests may share a
+      Test ID as long as the levels do not overlap.
     </p>
 
     <div class="scroll">
@@ -418,30 +424,25 @@
       Enter the correct answer for questions 1&ndash;<span id="q-count">80</span>
       for each test.
     </p>
-    <p class="note" style="margin-bottom:.35rem">
-      There are three ways in. <strong>Pick whichever one suits you</strong> —
-      you only need one.
-    </p>
+    <p class="note" style="margin-bottom:.35rem">Pick one of the two options.</p>
     <ul class="note">
-      <li><strong>A. Type or paste answers directly</strong> &mdash; easiest
-        for most people, and the one below.</li>
-      <li><strong>B. Upload a spreadsheet</strong> &mdash; instead of A, if you
-        already have an answer key written down.</li>
-      <li><strong>C. Edit the grid</strong> &mdash; instead of A, or after it,
-        to review or change individual answers.</li>
+      <li><strong>A. Type or paste directly</strong> (easiest).</li>
+      <li><strong>B. Upload a spreadsheet.</strong></li>
+      <li><strong>C. Edit the grid</strong> &mdash; you can also review or
+        change answers here.</li>
     </ul>
 
-    <h3>A. Type or paste the answers &mdash; recommended</h3>
+    <h3>A. Type or paste the answers</h3>
     <p class="note">
       One box per test. Separate the answers with spaces, commas or newlines,
       or paste one unbroken string like <code>ABCDE…</code>.
     </p>
     <div id="answers"></div>
 
-    <div class="or">or instead</div>
+    <div class="or">or</div>
 
     <details class="method">
-      <summary>B. Upload a spreadsheet &mdash; alternative</summary>
+      <summary>B. Upload a spreadsheet</summary>
       <div class="body">
         <p class="note">
           Download the template, type the answers into the numbered rows in
@@ -456,7 +457,7 @@
     </details>
 
     <details class="method">
-      <summary>C. Edit the grid &mdash; alternative</summary>
+      <summary>C. Review answers (optional)</summary>
       <div class="body">
         <p class="note">
           Every answer is editable here, however it got in. A cell you have
@@ -469,24 +470,21 @@
     <h3>What goes in a cell</h3>
     <table class="cells">
       <tr><td>C</td>
-        <td>The answer is C. The student must fill C and nothing else.</td></tr>
+        <td>The answer is C.</td></tr>
       <tr><td>ABD</td>
-        <td>The answer is A, B and D <em>together</em>. The student must fill
+        <td>The answer is A, B and D. The student must fill
           all three.</td></tr>
       <tr><td>A|BD</td>
-        <td><em>Either</em> is accepted: A on its own, or B and D together.</td></tr>
+        <td>Either is accepted: A on its own, or B and D together.</td></tr>
       <tr><td>X</td>
-        <td><strong>Exclude this question from scoring.</strong> Use this if you
-          discover after the test that a question should not count. It is right
-          for nobody and wrong for nobody, and it drops out of every total.</td></tr>
+        <td>Exclude this question from scoring. Use if you
+          discover after the test that a question should not count.</td></tr>
       <tr><td>-</td>
-        <td>You have not entered this answer yet. It holds the place, so that
-          question 41 stays question 41.</td></tr>
+        <td>You have not entered this answer yet (placeholder).</td></tr>
     </table>
     <p class="note">
-      <code>X</code> and <code>-</code> are easy to mix up:
-      <strong><code>X</code> means the question is finished with and will not be
-      scored</strong>, while <code>-</code> just means you have not typed it in.
+      <strong><code>X</code> means the question is finished and will not be
+      scored</strong>, while <code>-</code> just means you have not typed it in yet.
     </p>
 
     <details class="tech">
@@ -503,13 +501,10 @@
             no limit on how many you list.</li>
           <li><strong>A repeated letter is an error.</strong> <code>AA</code> is
             rejected, as is a stray <code>|</code> such as <code>A|</code>, and
-            any letter outside A&ndash;E. This step flags them as you type,
-            and the server would refuse them too rather than grade against a
-            key that cannot mean what it says.</li>
-          <li><strong>You can mix the three methods.</strong> They all write to
-            the same answers &mdash; paste a test, then correct one cell in the
-            grid, then upload a spreadsheet for a fourth test.</li>
-          <li><strong>Uploading merges, it does not replace.</strong> A column
+            any letter outside A&ndash;E.</li>
+          <li><strong>A and B can be mixed.</strong> They write to the same
+            answers, and the grid shows whatever is there.</li>
+          <li><strong>Uploading merges, instead of replacing.</strong> A column
             whose Test ID matches a test you already have updates that test;
             anything else is added. Tests not mentioned in the file are left
             alone, and <strong>Undo upload</strong> puts everything back.</li>
@@ -521,7 +516,7 @@
       </div>
     </details>
 
-    <div class="row" style="margin-top:.9rem">
+    <div class="row" id="download-key-row" style="margin-top:.9rem">
       <button class="primary" id="download-key" hidden>Download Keys.csv</button>
     </div>
     <div class="msg" id="msg-key"></div>
@@ -531,9 +526,32 @@
 <!-- 5 ------------------------------------------------------------------ -->
 <details class="step" id="step-thresholds">
   <summary><span class="num"><span>5</span></span>
-    <span class="title">Thresholds</span>
-    <span class="hint" id="hint-thresholds">Automatic</span></summary>
+    <span class="title">Advanced</span>
+    <span class="hint" id="hint-thresholds">Defaults</span></summary>
   <div class="body">
+    <p class="note">
+      Nothing here needs changing for an ordinary run. It is all remembered,
+      and applies to every batch you grade from now on.
+    </p>
+
+    <h3>Which tests to grade</h3>
+    <p class="note">
+      Every test on the sheet, unless you say otherwise. Untick one and its
+      columns are not read at all: no results, no answer key needed, and
+      nothing on the review sheets. Useful when a test is scored elsewhere, or
+      when its key is not ready yet.
+    </p>
+    <div class="chips" id="which-tests"></div>
+
+    <h3>Marked-up scans</h3>
+    <label class="inline"><input type="checkbox" id="annotate"> Mark-up scan</label>
+    <p class="note">
+      Marked-up scans show which bubbles were read as filled, along with the
+      correct answer. They make a run noticeably slower, so leave this off
+      unless you are demoing or debugging.
+    </p>
+
+    <h3>Thresholds</h3>
     <p class="note">
       Every bubble is measured for darkness on a scale from 0 (blank paper) to
       1 (solid black). A bubble darker than the <strong>cutoff</strong> counts
@@ -619,24 +637,9 @@
       If the paper itself needs re-reading, scan it again and add it as a new
       batch — a batch that has been graded stays as it was.
     </p>
-    <h3>Which tests to grade</h3>
-    <p class="note">
-      Every test on the sheet, unless you say otherwise. Untick one to leave it
-      out: its columns are not read at all, so it produces no results, needs no
-      answer key, and never appears on the review sheets. Useful when one test
-      is scored elsewhere, or when its key is not ready yet.
-    </p>
-    <div class="chips" id="which-tests" style="margin-bottom:1rem"></div>
-
     <div class="row" style="margin-bottom:.8rem">
       <button id="add-batch">Add a batch</button>
-      <label class="inline"><input type="checkbox" id="annotate"> Mark-up scan</label>
     </div>
-    <p class="note">
-      Marked-up scans show which bubbles were marked as filled, along with the
-      correct answer. They make a run noticeably slower, so turn off unless you
-      are demoing or debugging.
-    </p>
     <div id="batches"></div>
     <div class="msg" id="msg-grade"></div>
   </div>
@@ -680,9 +683,14 @@
       <li><strong>Extensions → Apps Script</strong>, paste in
         <a href="Sheet.gs" download>Sheet.gs</a>, and Save.</li>
       <li>Click the <strong>Triggers</strong> (clock) icon →
-        <strong>Add Trigger</strong>: function
-        <code>onSpreadsheetChange</code>, source <em>From spreadsheet</em>,
-        type <em>On change</em>. Save and accept the prompt.</li>
+        <strong>Add Trigger</strong>.
+        <ul>
+          <li>function — <code>onSpreadsheetChange</code></li>
+          <li>source — <em>From spreadsheet</em></li>
+          <li>type — <em>On change</em></li>
+          <li>Save and accept the prompt.</li>
+        </ul>
+      </li>
       <li>For each file: <strong>File → Import → Insert new sheet(s)</strong>.
         It has to create a <em>new sheet</em> — "Replace current sheet" will not
         trigger the script.</li>

@@ -137,12 +137,12 @@ function setStep(id, done, hintId, hint) {
   if (hintId && $(hintId)) $(hintId).textContent = hint;
 }
 
-/* Open a later step once the one before it is done, but only the first time:
-   re-opening something deliberately collapsed is worse than leaving it shut. */
 /* Sheet wording from an invite link, applied once /health has supplied the
    defaults it was expressed against. */
 let invited = null;
 
+/* Open a later step once the one before it is done, but only the first time:
+   re-opening something deliberately collapsed is worse than leaving it shut. */
 const advanced = new Set();
 function advance(id) {
   if (advanced.has(id)) return;
@@ -265,15 +265,18 @@ function customSheet() {
   return Object.keys(changed).length ? changed : null;
 }
 
-function inviteLink() {
-  // The wording travels; the tests, answers and results do not. They would
-  // make the link unwieldy, and they are the part worth keeping private.
+/* `withDesign` adds the sheet wording and the advanced settings. The tests,
+   answers and results never travel: they would make the link unwieldy, and
+   Keys.csv is already a file made to be passed around. */
+function inviteLink(withDesign) {
   const payload = JSON.stringify({
     e: $('endpoint').value.trim(),
     p: $('passphrase').value,
-    s: customSheet() || undefined,
-    t: state.thresholdMode === 'manual' ? state.threshold : undefined,
-    o: Array.isArray(state.onlyTests) ? state.onlyTests : undefined,
+    s: withDesign ? (customSheet() || undefined) : undefined,
+    t: withDesign && state.thresholdMode === 'manual'
+      ? state.threshold : undefined,
+    o: withDesign && Array.isArray(state.onlyTests)
+      ? state.onlyTests : undefined,
   });
   const bytes = new TextEncoder().encode(payload);
   const base64 = btoa(String.fromCharCode(...bytes))
@@ -311,19 +314,22 @@ function readInvite() {
   }
 }
 
-async function copyInvite() {
+async function copyInvite(withDesign) {
+  const box = withDesign ? 'msg-sheet' : 'msg-connect';
   if (!$('endpoint').value.trim()) {
-    return say('msg-connect', 'bad',
-               'Fill the server address in first, then copy the link.');
+    return say(box, 'bad',
+               'Connect in step 1 first, then copy the link.');
   }
-  const link = inviteLink();
+  const link = inviteLink(withDesign);
+  const what = withDesign
+    ? 'Link copied, carrying the server details and this sheet design.'
+    : 'Invite link copied.';
   try {
     await navigator.clipboard.writeText(link);
-    say('msg-connect', 'ok',
-        'Invite link copied. It carries the passphrase, so send it privately.');
+    say(box, 'ok', what + ' It contains the passphrase, so send it privately.');
   } catch (error) {
     // Clipboard access can be refused; show the link so it can be copied out.
-    say('msg-connect', 'warn',
+    say(box, 'warn',
         'This browser would not let the page use the clipboard. Copy the ' +
         'link by hand:\n\n' + link);
   }
@@ -361,6 +367,7 @@ async function connect() {
     renderTests();
     ['step-sheet', 'step-tests', 'step-key', 'step-grade',
      'step-review'].forEach(advance);
+    renderAdvancedHint();
   } catch (error) {
     say('msg-connect', 'bad', error.message);
     setStep('step-connect', false, 'hint-connect', 'Not connected');
@@ -446,8 +453,8 @@ function renderLevelButtons() {
   $('add-level').disabled = count >= max;
   $('drop-level').disabled = count <= min;
   $('level-count').textContent =
-    count + ' of ' + max + ' levels. Any test already limited to a level you ' +
-    'remove loses it.';
+    count + ' of ' + max + ' levels. Removing one also removes it from any ' +
+    'test that was restricted to it.';
 }
 
 function setLevelCount(next) {
@@ -883,6 +890,7 @@ function updateKeyMessage() {
   const answersExist = state.tests.some((test) => answered(test) > 0);
   $('download-key').hidden =
     !answersExist || (!!state.keySource && !overwritten.length);
+  $('download-key-row').classList.toggle('empty', $('download-key').hidden);
   $('undo-key').hidden = !state.undo;
 
   setStep('step-key',
@@ -1068,6 +1076,20 @@ function thresholdSpec() {
   return parts.every((part) => part === '') ? '' : parts.join(',');
 }
 
+/* One line for whatever has been changed away from the defaults. */
+function renderAdvancedHint() {
+  const notes = [];
+  const spec = thresholdSpec();
+  if (testsSpec()) {
+    notes.push(plural(gradedTests().length, 'test ', 'tests ') +
+               gradedTests().join(' and ') + ' only');
+  }
+  if (state.annotate) notes.push('mark-up on');
+  if (spec) notes.push('thresholds fixed');
+  setStep('step-thresholds', true, 'hint-thresholds',
+          notes.length ? notes.join(', ') : 'Defaults');
+}
+
 function renderThresholds() {
   const manual = state.thresholdMode === 'manual';
   $('thr-override').checked = manual;
@@ -1075,9 +1097,7 @@ function renderThresholds() {
   ['as', 'ar', 'ms', 'mr'].forEach((key) => {
     $('thr-' + key).value = state.threshold[key] || '';
   });
-  const spec = thresholdSpec();
-  setStep('step-thresholds', true, 'hint-thresholds',
-          spec ? 'Fixed: ' + spec : 'Automatic');
+  renderAdvancedHint();
 }
 
 // --- 6. grading ------------------------------------------------------------
@@ -1132,7 +1152,7 @@ function renderWhichTests() {
       }
       say('msg-grade', '', '');
       state.onlyTests = next.length === testsPerSheet() ? null : next;
-      save(); renderWhichTests();
+      save(); renderWhichTests(); renderAdvancedHint();
     };
     host.append(el('label', {}, [box, 'Test ' + number + ' (' +
                                       sideOfTest(number) + ')']));
@@ -1150,7 +1170,7 @@ function renderBatches() {
   host.textContent = '';
   if (!state.batches.length) {
     host.append(el('p', { className: 'note',
-      textContent: 'No batches yet.' }));
+                          textContent: 'No batches yet.' }));
   }
   state.batches.forEach((batch, index) => host.append(batchCard(batch, index)));
 
@@ -1450,7 +1470,8 @@ function start() {
   $('annotate').checked = state.annotate;
 
   $('connect').onclick = connect;
-  $('invite').onclick = copyInvite;
+  $('invite').onclick = () => copyInvite(false);
+  $('invite-sheet').onclick = () => copyInvite(true);
 
   $('make-sheet').onclick = makeSheet;
   $('reset-sheet').onclick = () => {
@@ -1514,7 +1535,8 @@ function start() {
   $('add-batch').onclick = addBatch;
   renderWhichTests();
   $('annotate').onchange = () => {
-    state.annotate = $('annotate').checked; save();
+    state.annotate = $('annotate').checked;
+    save(); renderAdvancedHint();
   };
 
   $('reset').onclick = () => {
