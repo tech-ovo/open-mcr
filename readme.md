@@ -9,7 +9,7 @@
 > students' grades are at stake, please audit the results — particularly with
 > low-quality scans. The `--annotate` option exists to make that audit quick.
 
-This is a fork of [OpenMCR](https://github.com/iansan5653/open-mcr), customised
+This is a fork of [OpenMCR](https://github.com/iansan5653/open-mcr), customized
 for the **California Junior Classical League State Convention**, where each
 student sits three eighty-question tests recorded on a single double-sided
 answer sheet.
@@ -97,7 +97,7 @@ python -m src.sheet_generation src/assets/cajcl_answer_sheet.pdf
 
 ### Answer keys
 
-Keys live in a CSV that convention staff maintain by hand - there is no longer
+Keys live in a CSV that staff maintain by hand - there is no longer
 a special "all nines" key sheet to scan. Start from the template:
 
 ```sh
@@ -132,17 +132,21 @@ An answer cell says what a **correct sheet looks like**:
 | `B` | The student filled B and nothing else. |
 | `ABD` | The student filled **all three** of A, B and D. |
 | `A|BD` | **Either** is accepted: A alone, or B and D together. |
-| *(blank)* | The question is not scored at all. |
+| `X` | The question is not scored at all. |
+| *(blank)* | Also not scored, but see below. |
 
 So several letters together are one answer requiring all of them, and `|`
-separates alternatives. Use a blank cell to retire a faulty question without
-renumbering anything.
+separates alternatives. Write `X` to retire a faulty question without
+renumbering anything: nobody is scored on it, and it drops out of the totals
+and out of `Question Stats.csv`. A blank cell does the same, but `X` says so on
+purpose, where a blank cell could just as easily be a row somebody forgot to
+fill in.
 
 Two things about a key are *breaking* - they stop the run before anything is
 written, because grading would otherwise be meaningless:
 
 - two columns sharing a Test ID;
-- an answer letter outside A-E, a stray `|`, or an unrecognised Latin level.
+- an answer letter outside A-E, a stray `|`, or an unrecognized Latin level.
 
 Two things are **not** breaking, and are recorded per row in `Results.csv`
 instead:
@@ -254,7 +258,7 @@ ls          # Windows: dir
 
 ### Step 2 — Lay out the folders
 
-Everything is organised by **batch**. A batch is one stack of sheets you
+Everything is organized by **batch**. A batch is one stack of sheets you
 scanned together; giving each one a number keeps its scans, its results and
 its review sheets apart from every other batch's.
 
@@ -277,7 +281,7 @@ The key sits outside the batch folders because one key serves every batch.
 Scan **every sheet double-sided**, so each student produces two pages, **front
 page first**. Settings that work well:
 
-- **Colour**: black and white, or grayscale. Colour also works.
+- **Color**: black and white, or grayscale. Color also works.
 - **Resolution**: 200–300 dpi. Higher is slower with no benefit.
 - **Output**: one PDF per batch is easiest — ten students becomes one
   twenty-page PDF.
@@ -409,7 +413,7 @@ The script then turns the option columns into real checkboxes, restores the
 leading zeros that a CSV import strips from IDs, fits every column to its
 contents, sets the whole sheet in Inconsolata, deletes the thousand empty
 padding rows the import leaves behind, freezes the header, offers a dropdown
-of Latin levels on the Missing sheet, and greys out each row as `Done` is
+of Latin levels on the Missing sheet, and grays out each row as `Done` is
 ticked. If a sheet is ever missed, use **CAJCL → Tidy this review sheet**.
 
 Several people can work in the sheet at once. When it is finished,
@@ -512,9 +516,12 @@ and `1` for a breaking problem, in which case nothing was written.
 
 ## Grading in a browser
 
-Everything above needs a terminal and a checkout. For the people who run the
-convention, there is a website instead: one page, seven steps, no install. It
-talks to a small service that runs this same pipeline.
+Everything above needs a terminal and a checkout. For everyone else there is a
+website instead: one page, seven steps, no install. It talks to a small service
+that runs this same pipeline.
+
+**<https://grade.uhsjcl.org>** is the UHS JCL deployment. It is useless without
+a server address and a passphrase, so it is safe to share the link.
 
 ### What is stored where
 
@@ -533,10 +540,10 @@ one batch and returns it, start to finish.
 The browser keeps more than the server does. Your test names, Test IDs, answer
 keys, thresholds and the `Results.csv` of every batch you have graded live in
 that browser's `localStorage`, so you can close the page and come back to it
-mid-convention. Scans are never stored, on either side: they go from the file
+later. Scans are never stored, on either side: they go from the file
 input to the server and the results come back in the same response. Marked-up
-PDFs are offered as a download and then dropped. Use **Start a new convention**
-at the foot of the page to clear it all.
+PDFs are offered as a download and then dropped. Use **Reset** at the foot of the
+page to clear it all.
 
 ### Deploying the service
 
@@ -567,10 +574,9 @@ dependencies. Any static host will serve it. `.github/workflows/deploy_site.yml`
 publishes it to GitHub Pages on every push that touches `site/`, and copies
 `tools/review_sheet.gs` in alongside it so step 7 can link to the Apps Script.
 
-For a custom domain such as `grading.uhsjcl.org`, set a repository variable
-named `SITE_DOMAIN` to that host and point a `CNAME` record at
-`<owner>.github.io`. Without the variable it publishes at the default github.io
-address.
+For a custom domain such as `grade.uhsjcl.org`, set a repository variable named
+`SITE_DOMAIN` to that host and point a `CNAME` record at `<owner>.github.io`.
+Without the variable it publishes at the default github.io address.
 
 The service allows requests from any origin, so the site can live anywhere,
 including a file opened from disk. The passphrase is what limits access, not the
@@ -581,12 +587,12 @@ domain.
 | Step | What it does |
 |---|---|
 | **1. Connect** | Endpoint and passphrase. The page asks the server how the sheet is laid out — how many tests, questions, Student ID digits and Latin levels — so the rest of the form matches the real sheet rather than a hardcoded copy of it. |
-| **2. Design and print the sheet** | The title, the directions, the seven Latin level names and the write-in labels, as text boxes. Generates the printable PDF. Cosmetic only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
-| **3. Write the key** | A test per row — name, Test ID, which Latin levels may not sit it — and a box for its 80 answers. Builds `Keys.csv` in the same transposed layout `--key` expects, and offers it as a download so it can be kept, edited and uploaded next year. |
-| **4. Thresholds** | Calibrated per batch by default. The four numbers can be pinned, individually or together, exactly as `--threshold` does. |
-| **5. Scan** | The scanner settings, and how big a batch should be. |
-| **6. Grade batches** | One card per batch, each with its own file input and its own results. Batches are independent, so a second one can be added at any time and the first one's results stay put. |
-| **7. Settle unclear marks** | `Unclear.csv` and `Missing.csv` per batch, the link to `review_sheet.gs`, and the upload that feeds the corrections back and re-scores without the scans. |
+| **2. Design and print the answer sheet** | The title, the directions, the seven Latin level names and the write-in labels, as text boxes. Generates the printable PDF. Wording only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
+| **3. List the tests** | A row per test — name, Test ID, which Latin levels may not sit it. Test IDs are zero-padded to four digits when you leave the box. |
+| **4. Enter the answers** | Three ways into the same data, and you can mix them: download the template and fill it in a spreadsheet, paste a whole test's answers at once, or type into the grid of every question. `Keys.csv` is offered back whenever it holds work that is not already in a file you have. Uploading merges by Test ID rather than replacing, and there is an Undo. |
+| **5. Thresholds** | Automatic per batch. Tick the override to pin the four numbers, individually or together, exactly as `--threshold` does. |
+| **6. Scan and grade** | The scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. |
+| **7. Fix unclear marks** | `Unclear.csv` and `Missing.csv` per batch, the upload that feeds the corrections back and re-scores without the scans, and the optional Apps Script for people who would rather work in Google Sheets. |
 
 ### Batch size
 

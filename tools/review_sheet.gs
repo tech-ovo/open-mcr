@@ -155,7 +155,7 @@ function formatReviewSheet(sheet) {
     doneRange.setHorizontalAlignment('center');
     sheet.setColumnWidth(index['Done'], CHECKBOX_WIDTH + 12);
 
-    // Grey out a row once it is ticked, so the remaining work is obvious.
+    // Gray out a row once it is ticked, so the remaining work is obvious.
     var doneLetter = columnLetter(index['Done']);
     var whole = sheet.getRange(2, 1, dataRows, lastColumn);
     var existing = sheet.getConditionalFormatRules();

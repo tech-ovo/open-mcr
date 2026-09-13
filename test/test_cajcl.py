@@ -241,6 +241,20 @@ def test_key_leaves_a_blank_cell_unscored(tmp_path):
     assert detail[0] == ""
 
 
+def test_key_treats_x_as_a_retired_question(tmp_path):
+    """An X says "do not score this" out loud, where a blank could be an
+    unfinished cell."""
+    answers = cycled(0)
+    answers[3] = "X"
+    answers[4] = "x"
+    keys = answer_key.load(write_key(tmp_path / "k.csv",
+                                     [("One", "1001", "", answers)]))
+    points, out_of, detail = keys["1001"].score(
+        [set() for _ in range(QUESTIONS)])
+    assert out_of == QUESTIONS - 2
+    assert detail[3] == "" and detail[4] == ""
+
+
 def test_key_template_round_trips(tmp_path):
     path = answer_key.write_template(tmp_path / "template.csv")
     rows = read_csv(path)

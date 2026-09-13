@@ -23,8 +23,9 @@ An answer cell says what a *correct sheet* looks like:
 * ``B`` - the student must have filled B and nothing else.
 * ``ABD`` - the student must have filled all three of A, B and D.
 * ``A|BD`` - either of those is accepted: A alone, or B and D together.
-* blank - the question is not scored at all, which is how to retire a faulty
-  question without renumbering anything.
+* ``X`` - the question is not scored at all, which is how to retire a faulty
+  question without renumbering anything. A blank cell means the same, but ``X``
+  says it on purpose, where a blank could just as easily be unfinished work.
 """
 
 import csv
@@ -40,6 +41,11 @@ REQUIRED_ROWS = (NAME_ROW, TEST_ID_ROW, EXCLUDED_ROW)
 
 #: Separates alternative acceptable answers within one cell.
 ALTERNATIVE_SEPARATOR = "|"
+
+#: An answer cell holding this retires the question: nobody is scored on it.
+#: A blank cell does the same, but this says so deliberately. It is safe to
+#: reserve because the letter is not one of the bubbles on the sheet.
+VOID_ANSWER = "X"
 
 #: Written next to a score when the student's Test ID matches no key.
 TEST_NOT_FOUND = "TEST NOT FOUND"
@@ -99,7 +105,7 @@ class Key(tp.NamedTuple):
 def _parse_answer_cell(cell: str, where: str
                        ) -> tp.Tuple[tp.FrozenSet[str], ...]:
     text = "".join(cell.split())
-    if not text:
+    if not text or text.upper() == VOID_ANSWER:
         return ()
     accepted: tp.List[tp.FrozenSet[str]] = []
     for alternative in text.split(ALTERNATIVE_SEPARATOR):
