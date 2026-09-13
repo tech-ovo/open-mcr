@@ -398,6 +398,38 @@ def test_students_are_scored_against_the_key_for_their_own_level(tmp_path):
     assert names == {"Reading Comp (lower)", "Reading Comp (upper)"}
 
 
+def test_only_the_chosen_tests_are_graded(tmp_path):
+    """--tests 2 reads the second test and leaves the others alone."""
+    sheets = [ss.SheetData(student_id="04275", latin_level="HS-2",
+                           test_ids=TEST_IDS,
+                           answers=[cycled(0), cycled(1), cycled(2)])]
+    result, folder = grade(tmp_path, sheets, key=write_key(tmp_path / "k.csv"),
+                           tests=(2,))
+    assert [row.test_id for row in result.rows] == ["1002"]
+    assert result.rows[0].points == QUESTIONS
+
+    # Nothing about the tests left out reaches the review sheets either.
+    assert all(row.test_id == "1002" for row in result.unclear)
+    assert not any("Test 1 ID" in row.field or "Test 3 ID" in row.field
+                   for row in result.missing)
+
+    rows = read_csv(folder / pipeline.RESULTS_FILENAME)
+    assert len(rows) == 2          # header plus the one test
+
+
+def test_parse_tests_normalises_the_spec():
+    assert pipeline.parse_tests("2", 3) == (2,)
+    assert pipeline.parse_tests("3,1", 3) == (1, 3)
+    # Every test listed is the same as no restriction.
+    assert pipeline.parse_tests("1,2,3", 3) is None
+    assert pipeline.parse_tests("", 3) is None
+    assert pipeline.parse_tests(None, 3) is None
+    with pytest.raises(pipeline.BreakingError, match="not a test"):
+        pipeline.parse_tests("4", 3)
+    with pytest.raises(pipeline.BreakingError, match="not a test"):
+        pipeline.parse_tests("two", 3)
+
+
 def test_unknown_test_id_is_recorded_not_fatal(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
                          test_ids=("9876", "1002", "1003"),

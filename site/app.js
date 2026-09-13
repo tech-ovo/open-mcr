@@ -31,6 +31,7 @@ function blank() {
     thresholdMode: 'auto',
     threshold: { as: '', ar: '', ms: '', mr: '' },
     annotate: false,
+    onlyTests: null,             // null grades every test on the sheet
     batches: [],
     nextBatch: 1,
     limits: null,
@@ -239,6 +240,61 @@ function filePicker(host, { accept, multiple = false, label = 'Choose file' }) {
   return input;
 }
 
+/* An invite carries the server details in the URL *fragment*, which browsers
+   never send to a web server. It is read once and then wiped from the address
+   bar, so it does not sit in the history of the machine that opened it. The
+   passphrase is still in whatever the link was sent through, which is why the
+   page says so in as many words. */
+function inviteLink() {
+  const payload = JSON.stringify({ e: $('endpoint').value.trim(),
+                                   p: $('passphrase').value });
+  const bytes = new TextEncoder().encode(payload);
+  const base64 = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return location.origin + location.pathname + '#k=' + base64;
+}
+
+function readInvite() {
+  const match = /[#&]k=([A-Za-z0-9\-_]+)/.exec(location.hash || '');
+  if (!match) return false;
+  // Wipe it whatever happens next, so a bad link is not left lying around.
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const base64 = match[1].replace(/-/g, '+').replace(/_/g, '/');
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+    const payload = JSON.parse(new TextDecoder().decode(bytes));
+    if (!payload.e) return false;
+    state.endpoint = payload.e;
+    state.passphrase = payload.p || '';
+    $('endpoint').value = state.endpoint;
+    $('passphrase').value = state.passphrase;
+    save();
+    return true;
+  } catch (error) {
+    console.warn('Could not read that invite link:', error);
+    return false;
+  }
+}
+
+async function copyInvite() {
+  if (!$('endpoint').value.trim()) {
+    return say('msg-connect', 'bad',
+               'Fill the server address in first, then copy the link.');
+  }
+  const link = inviteLink();
+  try {
+    await navigator.clipboard.writeText(link);
+    say('msg-connect', 'ok',
+        'Invite link copied. It carries the passphrase, so send it privately.');
+  } catch (error) {
+    // Clipboard access can be refused; show the link so it can be copied out.
+    say('msg-connect', 'warn',
+        'This browser would not let the page use the clipboard. Copy the ' +
+        'link by hand:\n\n' + link);
+  }
+}
+
 // --- 1. connect ------------------------------------------------------------
 
 async function connect() {
@@ -258,6 +314,7 @@ async function connect() {
         `${health.latin_level_count} Latin levels.`);
     setStep('step-connect', true, 'hint-connect', 'Connected');
     renderLimits();
+    renderWhichTests();
     renderSheetForm();
     renderTests();
     ['step-sheet', 'step-tests', 'step-key', 'step-thresholds', 'step-grade',
@@ -922,6 +979,50 @@ function renderThresholds() {
 
 // --- 6. grading ------------------------------------------------------------
 
+function testsPerSheet() {
+  return state.limits ? state.limits.tests_per_sheet : 3;
+}
+
+/* Which test numbers this run will grade. */
+function gradedTests() {
+  const total = testsPerSheet();
+  const all = Array.from({ length: total }, (_, index) => index + 1);
+  if (!Array.isArray(state.onlyTests)) return all;
+  const kept = state.onlyTests.filter((number) => number <= total);
+  return kept.length ? kept : all;
+}
+
+/* '' when every test is graded, so the common case sends nothing. */
+function testsSpec() {
+  const kept = gradedTests();
+  return kept.length === testsPerSheet() ? '' : kept.join(',');
+}
+
+function renderWhichTests() {
+  const host = $('which-tests');
+  if (!host) return;
+  host.textContent = '';
+  const kept = gradedTests();
+  for (let number = 1; number <= testsPerSheet(); number++) {
+    const box = el('input', { type: 'checkbox',
+                              checked: kept.includes(number) });
+    box.onchange = () => {
+      const next = box.checked
+        ? kept.concat([number]).sort((a, b) => a - b)
+        : kept.filter((item) => item !== number);
+      if (!next.length) {
+        box.checked = true;
+        return say('msg-grade', 'bad',
+                   'At least one test has to be graded.');
+      }
+      say('msg-grade', '', '');
+      state.onlyTests = next.length === testsPerSheet() ? null : next;
+      save(); renderWhichTests();
+    };
+    host.append(el('label', {}, [box, 'Test ' + number]));
+  }
+}
+
 function addBatch() {
   state.batches.push({ n: state.nextBatch++, summary: null, results: '',
                        files: [], seconds: 0, review: {} });
@@ -1012,6 +1113,7 @@ function batchCard(batch, index) {
     form.append('batch', String(batch.n));
     form.append('threshold', thresholdSpec());
     form.append('annotate', state.annotate ? 'true' : 'false');
+    form.append('tests', testsSpec());
     if (state.sheet) form.append('layout', JSON.stringify(state.sheet));
 
     const started = performance.now();
@@ -1020,6 +1122,7 @@ function batchCard(batch, index) {
       const body = await call('/grade', { method: 'POST', body: form });
       fill.style.width = '100%';
       batch.seconds = (performance.now() - started) / 1000;
+      batch.tests = testsSpec();
       batch.summary = body.summary;
       const resultsFile = body.files.find(
         (item) => item.name.endsWith('Results.csv'));
@@ -1084,6 +1187,14 @@ function summaryView(batch) {
       [summary.test_not_allowed + ' ' +
        plural(summary.test_not_allowed, 'row is', 'rows are') +
        ' for a test that student’s Latin level may not take.']));
+  }
+
+  if (batch.tests) {
+    const numbers = batch.tests.split(',');
+    box.append(el('p', { className: 'note', textContent:
+      'Only ' + plural(numbers.length, 'test ', 'tests ') +
+      numbers.join(' and ') + ' ' +
+      plural(numbers.length, 'was', 'were') + ' graded in this batch.' }));
   }
 
   box.append(fileList(batch.files));
@@ -1223,6 +1334,7 @@ function start() {
   $('annotate').checked = state.annotate;
 
   $('connect').onclick = connect;
+  $('invite').onclick = copyInvite;
 
   $('make-sheet').onclick = makeSheet;
   $('reset-sheet').onclick = () => {
@@ -1272,6 +1384,7 @@ function start() {
   });
 
   $('add-batch').onclick = addBatch;
+  renderWhichTests();
   $('annotate').onchange = () => {
     state.annotate = $('annotate').checked; save();
   };
@@ -1292,6 +1405,8 @@ function start() {
   renderThresholds();
   renderBatches();
   renderLimits();
+  // An invite link overrides whatever this browser had saved.
+  readInvite();
   if (state.endpoint && state.passphrase) connect();
 }
 

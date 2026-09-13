@@ -299,8 +299,15 @@ class RunOptions(tp.NamedTuple):
     debug: bool = False
     sheet_text: tp.Optional[layout.SheetText] = None
     """The wording printed on the sheets being read. Only the Latin level
-    names matter here, but they matter twice: to validate the key's Excluded
+    names matter here, but they matter twice: to validate the key's Allowed
     row, and to write the level into the results."""
+
+    tests: tp.Optional[tp.Tuple[int, ...]] = None
+    """Which of the sheet's tests to grade, numbered from 1 across the whole
+    sheet. None grades all of them. A test left out produces no result row,
+    and nothing about it is asked for on the review sheets - its columns are
+    simply not read, which is what makes it useful when one test of the three
+    is scored somewhere else or not at all."""
 
 
 def _sample_page_indexes(sheets: tp.Sequence[batching.Sheet],
@@ -316,6 +323,32 @@ def _sample_page_indexes(sheets: tp.Sequence[batching.Sheet],
             if len(wanted) >= CALIBRATION_PAGES:
                 break
     return sorted(wanted.values())
+
+
+def parse_tests(spec: tp.Optional[str], available: int
+                ) -> tp.Optional[tp.Tuple[int, ...]]:
+    """Read "2" or "1,3" into the test numbers to grade.
+
+    Blank, or every test listed, means None - grade all of them, which keeps
+    the common case out of the results and the reports.
+    """
+    text = (spec or "").strip()
+    if not text:
+        return None
+    wanted: tp.List[int] = []
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit() or not 1 <= int(part) <= available:
+            raise BreakingError(
+                f"'{part}' is not a test on this sheet. It carries "
+                f"{available} tests, numbered 1 to {available}.")
+        if int(part) not in wanted:
+            wanted.append(int(part))
+    if not wanted:
+        return None
+    return None if len(wanted) == available else tuple(sorted(wanted))
 
 
 def resolve_batch_folder(base: pathlib.Path,
@@ -337,7 +370,8 @@ class RunResult(tp.NamedTuple):
 
 def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
                thresholds: th.Thresholds, front_id: str, front_level: str,
-               tests_before: int
+               tests_before: int,
+               wanted: tp.Optional[tp.Tuple[int, ...]] = None
                ) -> tp.Tuple[tp.List[TestRow],
                              tp.List[review_module.UnclearRow],
                              tp.List[str], str, str]:
@@ -384,10 +418,12 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
             note_missing("Latin level")
 
     for column_index, (_, questions) in enumerate(scan.tests):
+        test_number = tests_before + column_index + 1
+        if wanted is not None and test_number not in wanted:
+            continue
         digits = scan.test_id_digits[column_index] \
             if column_index < len(scan.test_id_digits) else ()
         test_id = reading.read_digits(digits, thresholds)
-        test_number = tests_before + column_index + 1
         for group in digits:
             if group.unclear(thresholds):
                 note_unclear(group, test_id)
@@ -551,7 +587,7 @@ def run(options: RunOptions,
                 for index in range(page.position_in_sheet))
             page_rows, page_unclear, page_missing, own_id, level = _interpret(
                 scan, page, batch_label, thresholds, front_id, front_level,
-                tests_before)
+                tests_before, options.tests)
             if page.position_in_sheet == 0:
                 front_id, front_level = own_id, level
             else:
@@ -617,7 +653,7 @@ def run(options: RunOptions,
     if options.annotate:
         annotated = annotation.write_marked_up(
             image_paths, scans_by_page, sheets, rows, thresholds_by_file, keys,
-            output / ANNOTATED_DIRNAME, console)
+            output / ANNOTATED_DIRNAME, console, options.tests)
         written.extend(annotated)
 
     return RunResult(rows=rows,

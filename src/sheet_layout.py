@@ -125,6 +125,8 @@ PAGE_TEST_ID_COLUMNS: tp.Tuple[tp.Tuple[int, ...], ...] = (
 )
 
 PAGES_PER_SHEET = len(PAGE_SUBCOLUMNS)
+#: How many tests one sheet carries, across both sides.
+TESTS_PER_SHEET = sum(len(page) for page in PAGE_SUBCOLUMNS)
 
 
 def cell_to_inches(column: float, row: float) -> tp.Tuple[float, float]:

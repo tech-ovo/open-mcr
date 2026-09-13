@@ -49,6 +49,7 @@ answer sheet.
 | **Regrade without rescanning** | `--regrade` re-scores an existing `Results.csv` against a corrected key or corrected review sheets. |
 | **Question statistics** | `Question Stats.csv` gives per-question counts and percent correct. |
 | **Marked-up PDFs** | `--annotate` rings every bubble the reader acted on, answers and metadata alike. |
+| **Grade some tests, not all** | `--tests 2` reads the second test on the sheet and ignores the rest - no results, no key needed, nothing on the review sheets. |
 | **A website, for everyone else** | The same pipeline behind a hosted endpoint, driven by a one-page site that walks an operator through all seven steps. Nothing is stored on the server. |
 
 ---
@@ -479,6 +480,20 @@ paste.
 Rows are matched on file, page and question, never on the Student ID, because
 a spreadsheet will silently turn `04275` into `4275`.
 
+### Grading only some of the tests
+
+The sheet carries three tests, and sometimes only one of them is yours. `--tests`
+takes the numbers to read, counted from 1 across the whole sheet:
+
+```sh
+python -m src.main "Scans" "Results" --batch 1 --key "Keys.csv" --tests 2
+```
+
+A test left out is not read at all. It produces no rows in `Results.csv`, needs
+no column in the key, and nothing about it reaches `Unclear.csv` or
+`Missing.csv` - so an unreadable Test ID on a test you are not grading cannot
+stop the run. `--tests 1,2,3` is the same as leaving the option off.
+
 ### Step 7 — Regrading after a key change
 
 The same command handles a corrected key. If a question turns out to be
@@ -548,6 +563,7 @@ python -m src.main --key-template <Keys.csv>
 | `--regrade Results.csv` | Re-score an existing results file without touching the scans. |
 | `--threshold SPEC` | Use these cutoffs instead of calibrating. Four numbers, two, one, blanks for "calibrate this one", or names such as `answer=0.42`. |
 | `--annotate` | Also write marked-up copies of every scan. |
+| `--tests N[,N...]` | Grade only these tests, numbered from 1 across the sheet. Default: all of them. |
 | `--key-template FILE.csv` | Write a blank answer key and exit. |
 | `-d`, `--debug` | Re-raise unexpected errors with a traceback. |
 
@@ -644,12 +660,12 @@ domain.
 
 | Step | What it does |
 |---|---|
-| **1. Connect** | Endpoint and passphrase. The page asks the server how the sheet is laid out — how many tests, questions, Student ID digits and Latin levels — so the rest of the form matches the real sheet rather than a hardcoded copy of it. |
+| **1. Connect** | Endpoint and passphrase, or an invite link that carries both (see below). The page asks the server how the sheet is laid out — how many tests, questions, Student ID digits and Latin levels — so the rest of the form matches the real sheet rather than a hardcoded copy of it. |
 | **2. Design and print the answer sheet** | The title, the directions, the seven Latin level names and the write-in labels, as text boxes. Generates the printable PDF. Wording only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
 | **3. List the tests** | A row per test — name, Test ID, and which Latin levels may take it. Test IDs are zero-padded to four digits when you leave the box, and two tests may share an ID when their levels do not overlap. |
 | **4. Enter the answers** | Three ways into the same data, and you can mix them: download the template and fill it in a spreadsheet, paste a whole test's answers at once, or type into the grid of every question. `Keys.csv` is offered back whenever it holds work that is not already in a file you have. Uploading merges by Test ID rather than replacing, and there is an Undo. |
 | **5. Thresholds** | Automatic per batch. Tick the override to pin the four numbers, individually or together, exactly as `--threshold` does. |
-| **6. Scan and grade** | The scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. |
+| **6. Scan and grade** | Which tests to grade, the scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. |
 | **7. Fix unclear marks** | `Unclear.csv` and `Missing.csv` per batch, the upload that feeds the corrections back and re-scores without the scans, and the optional Apps Script for people who would rather work in Google Sheets. |
 
 ### Batch size
@@ -664,6 +680,18 @@ batches on the page. Each gets its own results, its own review sheets and its
 own calibration, and the page keeps them side by side. Splitting a 600-page PDF
 in JavaScript would mean holding it all in memory in a browser tab, which is a
 worse place for it than the scanner's own document feeder.
+
+### Invite links
+
+**Copy an invite link** in step 1 builds a URL that fills the server address
+and passphrase in for whoever opens it. The details ride in the URL *fragment*,
+which browsers never send to a web server, and the page wipes it from the
+address bar as soon as it has read it - so it does not linger in the guest's
+history.
+
+That is the only protection it has. **The passphrase is in the link**: anyone
+holding it can grade. Send it however you would send the passphrase itself, and
+never anywhere public. To cut off an old link, rotate the passphrase.
 
 ### Endpoints
 

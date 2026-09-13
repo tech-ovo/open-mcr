@@ -210,8 +210,7 @@ def build_app():
         return {
             "ok": True,
             "questions_per_test": sheet_layout.QUESTIONS_PER_TEST,
-            "tests_per_sheet": sum(
-                len(page) for page in sheet_layout.PAGE_SUBCOLUMNS),
+            "tests_per_sheet": sheet_layout.TESTS_PER_SHEET,
             "pages_per_sheet": sheet_layout.PAGES_PER_SHEET,
             "student_id_digits": sheet_layout.STUDENT_ID_DIGITS,
             "test_id_digits": sheet_layout.TEST_ID_DIGITS,
@@ -274,6 +273,7 @@ def build_app():
                     batch: str = Form(""),
                     threshold: str = Form(""),
                     annotate: str = Form("false"),
+                    tests: str = Form(""),
                     layout: str = Form("")):
         check(request)
         text = read_text_config(layout)
@@ -309,6 +309,8 @@ def build_app():
                 override_files=tuple(override_paths),
                 threshold_spec=threshold or None,
                 annotate=annotate.lower() in ("1", "true", "yes", "on"),
+                tests=pipeline.parse_tests(
+                    tests, sheet_layout.TESTS_PER_SHEET),
                 sheet_text=text)
 
             transcript = console_module.Console(enabled=False)

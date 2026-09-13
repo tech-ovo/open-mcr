@@ -5,7 +5,7 @@ name: Deploy Site
 # in the Apps Script file, which is authored in tools/ and served next to the
 # page so step 7 can link to it.
 #
-# To use a custom domain (grading.uhsjcl.org, say), set a repository variable
+# To use a custom domain (grade.uhsjcl.org, say), set a repository variable
 # named SITE_DOMAIN to that host and point a CNAME record at
 # <owner>.github.io. Leave the variable unset to publish at the default
 # github.io address.
@@ -24,14 +24,19 @@ permissions:
   pages: write
   id-token: write
 
-# A run already in flight is allowed to finish; only queued runs are dropped.
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Without this a job that cannot get a runner sits in the queue for the
+    # six-hour default, holding its concurrency slot the whole time.
+    timeout-minutes: 10
+    # Deliberately NOT the shared "pages" group used by the deploy job below.
+    # A build queued in that group blocks every later run in it, including a
+    # manual one - which is how a single stuck job takes the whole workflow
+    # down. Here a newer push simply supersedes an older build.
+    concurrency:
+      group: pages-build-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
 
@@ -53,6 +58,12 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only the publish itself is serialised, and it is never cancelled midway:
+    # a half-applied Pages deployment is worse than a slow one.
+    concurrency:
+      group: pages-deploy
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

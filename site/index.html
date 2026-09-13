@@ -174,6 +174,13 @@
   .answer-grid input.edited { color: var(--accent); font-weight: 700; }
   .answer-grid td + td, .answer-grid th + th { border-left: 1px solid var(--line-soft); }
 
+  /* Separates a step's main path from the alternatives below it. */
+  .or { display: flex; align-items: center; gap: .7rem; margin: 1.1rem 0 .8rem;
+        color: var(--ink-faint); font-size: .78rem; text-transform: uppercase;
+        letter-spacing: .08em; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px;
+                            background: var(--line); }
+
   /* Methods B and C: shut unless wanted. */
   details.method { border: 1px solid var(--line); border-radius: 8px;
                    margin: 0 0 .6rem; }
@@ -260,8 +267,7 @@
       sheet itself does not depend on the tests or the answers.</li>
     <li><strong>List the tests and enter the answer keys.</strong> This can wait
       until after the exam if you would rather.</li>
-    <li><strong>Scan the completed sheets</strong> and upload them here, in
-      batches of about 25.</li>
+    <li><strong>Scan the completed sheets</strong> and upload them here.</li>
     <li><strong>Fix anything unclear</strong>, and download the results.</li>
   </ol>
   <p class="note where">
@@ -289,7 +295,14 @@
     </div>
     <div class="row">
       <button class="primary" id="connect">Connect</button>
+      <button id="invite">Copy an invite link</button>
     </div>
+    <p class="note">
+      An invite link fills both boxes in for whoever opens it, so nobody has to
+      be walked through this step. <strong>The passphrase is inside the
+      link</strong> — anyone who has it can grade. Send it the way you would
+      send the passphrase itself, and not somewhere public.
+    </p>
     <div class="msg" id="msg-connect"></div>
   </div>
 </details>
@@ -383,25 +396,30 @@
       Enter the correct answer for questions 1&ndash;<span id="q-count">80</span>
       for each test.
     </p>
-    <p class="note" style="margin-bottom:.35rem">Choose one method:</p>
+    <p class="note" style="margin-bottom:.35rem">
+      There are three ways in. <strong>Pick whichever one suits you</strong> —
+      you only need one.
+    </p>
     <ul class="note">
       <li><strong>A. Type or paste answers directly</strong> &mdash; easiest
-        for most people.</li>
-      <li><strong>B. Upload a spreadsheet</strong> &mdash; useful if you
+        for most people, and the one below.</li>
+      <li><strong>B. Upload a spreadsheet</strong> &mdash; instead of A, if you
         already have an answer key written down.</li>
-      <li><strong>C. Edit the grid</strong> &mdash; useful for reviewing, or
-        for changing individual answers.</li>
+      <li><strong>C. Edit the grid</strong> &mdash; instead of A, or after it,
+        to review or change individual answers.</li>
     </ul>
 
-    <h3>A. Type or paste the answers</h3>
+    <h3>A. Type or paste the answers &mdash; recommended</h3>
     <p class="note">
       One box per test. Separate the answers with spaces, commas or newlines,
       or paste one unbroken string like <code>ABCDE…</code>.
     </p>
     <div id="answers"></div>
 
+    <div class="or">or instead</div>
+
     <details class="method">
-      <summary>B. Upload a spreadsheet</summary>
+      <summary>B. Upload a spreadsheet &mdash; alternative</summary>
       <div class="body">
         <p class="note">
           Download the template, type the answers into the numbered rows in
@@ -416,7 +434,7 @@
     </details>
 
     <details class="method">
-      <summary>C. Edit the grid</summary>
+      <summary>C. Edit the grid &mdash; alternative</summary>
       <div class="body">
         <p class="note">
           Every answer is editable here, however it got in. A cell you have
@@ -468,8 +486,7 @@
             key that cannot mean what it says.</li>
           <li><strong>You can mix the three methods.</strong> They all write to
             the same answers &mdash; paste a test, then correct one cell in the
-            grid, then upload a spreadsheet for a fourth test. Most people will
-            not need to.</li>
+            grid, then upload a spreadsheet for a fourth test.</li>
           <li><strong>Uploading merges, it does not replace.</strong> A column
             whose Test ID matches a test you already have updates that test;
             anything else is added. Tests not mentioned in the file are left
@@ -580,6 +597,15 @@
       without re-reading the scans. If the paper itself needs re-reading, scan
       it again and add it as a new batch.
     </p>
+    <h3>Which tests to grade</h3>
+    <p class="note">
+      Every test on the sheet, unless you say otherwise. Untick one to leave it
+      out: its columns are not read at all, so it produces no results, needs no
+      answer key, and never appears on the review sheets. Useful when one test
+      is scored elsewhere, or when its key is not ready yet.
+    </p>
+    <div class="chips" id="which-tests" style="margin-bottom:1rem"></div>
+
     <div class="row" style="margin-bottom:.8rem">
       <button id="add-batch">Add a batch</button>
       <label class="inline"><input type="checkbox" id="annotate"> Mark-up scan</label>
@@ -619,8 +645,8 @@
     </p>
     <p class="note">
       <strong>Sheets is worth setting up when several people are correcting at
-      once.</strong> That is the point of it: everyone opens the same file and
-      works through different rows at the same time, and you download it once
+      once.</strong> Everyone opens the same file and works through different
+      rows at the same time, and you download it once
       at the end. The script below is a convenience on top of that — it adds
       checkboxes so nobody has to type <code>TRUE</code>, restores the leading
       zeros on Student IDs that a spreadsheet would otherwise eat, fits the

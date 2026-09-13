@@ -75,8 +75,8 @@ def _legend(image: np.ndarray, heading: str, scored: bool):
                     max(int(round(1.3 * scale)), 1), cv2.LINE_AA)
 
 
-def annotate_page(image: np.ndarray, scan, thresholds, key, heading: str
-                  ) -> np.ndarray:
+def annotate_page(image: np.ndarray, scan, thresholds, key, heading: str,
+                  tests_before: int = 0, only_tests=None) -> np.ndarray:
     """Draw one page's reading onto a copy of the scan."""
     annotated = image.copy()
     if annotated.ndim == 2:
@@ -98,8 +98,12 @@ def annotate_page(image: np.ndarray, scan, thresholds, key, heading: str
             elif review <= fill <= select:
                 _ring(annotated, circle, UNCLEAR_COLOR)
 
-    # Answers.
+    # Answers. A test left out of the run was never read, so there is
+    # nothing truthful to draw on it.
     for column_index, (_, questions) in enumerate(scan.tests):
+        if only_tests is not None and \
+                tests_before + column_index + 1 not in only_tests:
+            continue
         accepted_for = key.answers if key is not None else None
         for index, group in enumerate(questions):
             chosen = group.selected(thresholds)
@@ -130,7 +134,7 @@ def annotate_page(image: np.ndarray, scan, thresholds, key, heading: str
 
 def write_marked_up(image_paths, scans_by_page, sheets, rows,
                     thresholds_by_file, keys, output_folder: pathlib.Path,
-                    console) -> tp.List[pathlib.Path]:
+                    console, only_tests=None) -> tp.List[pathlib.Path]:
     """One marked-up PDF per input file. Pages are re-read from the source and
     spooled to disk, so a large batch stays within bounded memory."""
     from PIL import Image
@@ -142,14 +146,20 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
     id_for_page: tp.Dict[tp.Tuple[str, int], str] = {}
     for row in rows:
         id_for_page.setdefault((row.source_file, row.page), row.student_id)
-        if keys is not None and row.test_id in keys:
-            key_for_page.setdefault((row.source_file, row.page),
-                                    keys[row.test_id])
+        # row.key is the one the row was actually scored against; a Test ID
+        # can name more than one.
+        if row.key is not None:
+            key_for_page.setdefault((row.source_file, row.page), row.key)
 
     pages_by_file: tp.Dict[pathlib.Path, tp.List] = {}
+    tests_before: tp.Dict[tp.Tuple[pathlib.Path, int], int] = {}
     for sheet in sheets:
+        seen = 0
         for page in sheet.pages:
             pages_by_file.setdefault(page.path, []).append(page)
+            tests_before[(page.path, page.page_index)] = seen
+            scan = scans_by_page.get((page.path, page.page_index))
+            seen += len(scan.tests) if scan is not None else 0
 
     written: tp.List[pathlib.Path] = []
     spool = pathlib.Path(tempfile.mkdtemp(prefix="open-mcr-annotated-"))
@@ -176,7 +186,9 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
                             annotated = annotate_page(
                                 image, scan, thresholds_by_file[path],
                                 key_for_page.get((path.name, index + 1)),
-                                heading)
+                                heading,
+                                tests_before.get((path, index), 0),
+                                only_tests)
                             spool_path = spool / f"{len(spooled):05d}.jpg"
                             cv2.imwrite(str(spool_path), annotated,
                                         [int(cv2.IMWRITE_JPEG_QUALITY), 85])

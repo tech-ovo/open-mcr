@@ -1,21 +1,49 @@
 name: Continuous Integration
 
+# Runs the test suite. It builds real answer sheets with the PDF generator,
+# reads them back with OpenCV, and drives the grading API in-process, so it
+# catches layout drift and scoring changes. It deploys nothing.
+
 on:
   push:
+    branches: [master]
+    paths-ignore:
+      - 'site/**'
+      - '**.md'
+      - '.github/workflows/deploy_site.yml'
   pull_request:
+    paths-ignore:
+      - 'site/**'
+      - '**.md'
+      - '.github/workflows/deploy_site.yml'
+  workflow_dispatch:
+
+# One run per branch. Pushing again supersedes the run already queued rather
+# than stacking another set of jobs behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    # Without this a job that cannot get a runner sits in the queue for the
+    # six-hour default, holding a concurrency slot the whole time.
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
-        # The two interpreters the project is verified against. The
-        # dependency ranges nominally allow 3.10 and 3.11 as well, but those
-        # are not exercised here.
-        python-version: ['3.12', '3.13']
+        # Spelled out rather than a full cross product: Windows 3.13 is where
+        # this is actually run, Linux 3.13 is what the Modal image uses, and
+        # Linux 3.12 covers the lower bound the dependency ranges allow.
+        include:
+          - os: windows-latest
+            python-version: '3.13'
+          - os: ubuntu-latest
+            python-version: '3.13'
+          - os: ubuntu-latest
+            python-version: '3.12'
 
     steps:
       - uses: actions/checkout@v5

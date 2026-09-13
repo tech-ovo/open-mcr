@@ -17,6 +17,7 @@ from . import answer_key
 from . import console as console_module
 from . import pipeline
 from . import review as review_module
+from . import sheet_layout as layout
 from . import thresholds as th
 from .file_handling import parse_path_arg
 
@@ -62,6 +63,11 @@ def build_parser() -> argparse.ArgumentParser:
                              "line to copy.")
     parser.add_argument("--annotate", action="store_true",
                         help="Also write a marked-up copy of every scan.")
+    parser.add_argument("--tests", metavar="N[,N...]",
+                        help="Grade only these tests, numbered from 1 across\n"
+                             "the sheet: '--tests 2' grades the second test\n"
+                             "and ignores the others. Defaults to all of\n"
+                             "them.")
     parser.add_argument("--key-template", type=parse_path_arg,
                         metavar="FILE.csv",
                         help="Write a blank answer key CSV to this path and\n"
@@ -196,6 +202,9 @@ def main(argv: list) -> int:
                                       override_files=tuple(args.overrides),
                                       threshold_spec=args.threshold,
                                       annotate=args.annotate,
+                                      tests=pipeline.parse_tests(
+                                          args.tests,
+                                          layout.TESTS_PER_SHEET),
                                       debug=args.debug)
         result = pipeline.run(options, console)
         output = pipeline.resolve_batch_folder(args.output_folder, args.batch)
