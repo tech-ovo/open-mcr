@@ -55,7 +55,12 @@ answer sheet.
 
 ## The CAJCL answer sheet
 
-Print it from **[`src/assets/cajcl_answer_sheet.pdf`](src/assets/cajcl_answer_sheet.pdf)**, double-sided, at **100% scale**.
+Print it from **[`src/assets/cajcl_answer_sheet.pdf`](src/assets/cajcl_answer_sheet.pdf)**,
+double-sided (*duplex*), at **100% scale**. Long-edge binding is the usual
+choice; short-edge works too, because the reader corrects a page that arrives
+upside down. "Fit to page" is acceptable if a printer insists on it — it reads
+correctly, it just makes the bubbles smaller. Do not print two pages to a
+sheet.
 
 **Front page (page 1 of 2)**
 
@@ -136,11 +141,19 @@ An answer cell says what a **correct sheet looks like**:
 | *(blank)* | Also not scored, but see below. |
 
 So several letters together are one answer requiring all of them, and `|`
-separates alternatives. Write `X` to retire a faulty question without
-renumbering anything: nobody is scored on it, and it drops out of the totals
-and out of `Question Stats.csv`. A blank cell does the same, but `X` says so on
-purpose, where a blank cell could just as easily be a row somebody forgot to
-fill in.
+separates alternatives.
+
+`X` **excludes a question from scoring** — use it when you find out after the
+exam that a question should not count. It is right for nobody and wrong for
+nobody, it drops out of every total and out of `Question Stats.csv`, and
+nothing has to be renumbered. A blank cell does the same, but `X` says so on
+purpose, where a blank could just as easily be a row somebody forgot to fill
+in.
+
+Letters are not case sensitive, and order within an answer does not matter:
+`abd`, `ABD` and `DBA` are one and the same. More than two alternatives are
+fine (`A|B|CD`). A repeated letter (`AA`), a stray `|`, or a letter outside
+A–E stops the run.
 
 Two things about a key are *breaking* - they stop the run before anything is
 written, because grading would otherwise be meaningless:
@@ -278,16 +291,29 @@ The key sits outside the batch folders because one key serves every batch.
 
 ### Step 3 — Scan the sheets
 
-Scan **every sheet double-sided**, so each student produces two pages, **front
-page first**. Settings that work well:
+Scan each sheet as **two consecutive pages: front first, back second**. Do not
+scan all the fronts first and all the backs afterwards.
 
-- **Color**: black and white, or grayscale. Color also works.
+**Required:**
+
+- **Page order.** Every front must be followed by its own back. The run stops
+  if the pages do not alternate, rather than grade the wrong back against the
+  wrong front.
+- **Blank page removal off.** It will silently drop a lightly-marked page and
+  throw the whole batch out of order.
+- **Do not crop into the corner marks.** The reader recovers the grid from
+  them, so an aggressive auto-crop can make a page unreadable.
+
+**Recommended:**
+
 - **Resolution**: 200–300 dpi. Higher is slower with no benefit.
+- **Color**: black and white, or grayscale. Color also works; grayscale keeps
+  the files small.
 - **Output**: one PDF per batch is easiest — ten students becomes one
   twenty-page PDF.
-- **Turn off** "auto-rotate", "deskew", "auto-crop" and "blank page removal".
-  Blank page removal in particular will silently drop a lightly-marked page
-  and throw the whole batch out of order.
+- **Deskew and auto-rotate** may be left on or off. The reader straightens the
+  page itself, and reads a page that arrives at any quarter turn, so neither
+  setting will break a batch.
 
 Put the resulting file(s) in `Scans/Batch 1`. Several files per batch is fine;
 they are read in filename order, and each must hold whole sheets.
@@ -647,6 +673,15 @@ If you need to change the sheet, these are the files that matter:
 | `site/` | The one-page website that drives it. |
 
 Because the generator and the reader both derive from `sheet_layout.py`, moving a block is a one-line change in one file — and `test/test_cajcl.py` fails if the two ever disagree.
+
+**Keep every bubble at the same outline weight.** The reader measures a disc
+slightly smaller than the printed circle, so a heavier ring spills into that
+disc and makes an *empty* bubble read darker. At 200 dpi a blank bubble reads
+0.037 at `sheet_generation.BUBBLE_LINE_WIDTH` and 0.145 at 1.0pt — so mixing
+the two splits the blank cluster in two and drags the calibrated review
+threshold up with it. `_bubble` sets the weight explicitly for exactly this
+reason; anything else that strokes a line should save and restore the canvas
+state rather than leave a new width behind.
 
 **Do not change the four corner marks.** `corner_finding` recovers the top-left grid corner by projecting out from the L-mark, and it needs to know where that mark sits relative to the corner. That relationship is `sheet_layout.L_MARK_OFFSET_FRACTION`, passed through to `corner_finding.find_corner_marks`. If you move the L-mark without updating it, the grid skews and the left-hand side of the sheet reads as noise.
 

@@ -16,6 +16,7 @@
 
 const STORE_KEY = 'jcl-grading-v1';
 const GAP = '-';               // a question not filled in yet
+const VOID = 'X';              // a question deliberately not scored
 
 const state = load();
 
@@ -194,22 +195,24 @@ function fileFromServer(item) {
   return new Blob([item.data], { type: item.type + ';charset=utf-8' });
 }
 
-/* A file input dressed as a button. The native control is unstyleable, so it
-   is hidden inside the label and the label reports the choice. */
+/* A file input dressed as a button, with what was chosen sitting beside it
+   rather than inside it — in the button it read as part of the label. */
 function filePicker(host, { accept, multiple = false, label = 'Choose file' }) {
-  host.className = 'filebtn';
+  host.className = 'picker';
   host.textContent = '';
   const input = el('input', { type: 'file', accept: accept, multiple: multiple });
-  const pick = el('span', { className: 'pick', textContent: label });
-  const chosen = el('span', { className: 'chosen', textContent: 'none chosen' });
+  const button = el('label', { className: 'filebtn' },
+    [input, el('span', { className: 'pick', textContent: label })]);
+  const chosen = el('span', { className: 'chosen',
+                              textContent: 'no file uploaded' });
   input.onchange = () => {
     const files = Array.from(input.files || []);
-    chosen.textContent = !files.length ? 'none chosen'
+    chosen.textContent = !files.length ? 'no file uploaded'
       : files.length === 1 ? files[0].name
       : files.length + ' files';
     if (host.onpicked) host.onpicked(files);
   };
-  host.append(input, pick, chosen);
+  host.append(button, chosen);
   return input;
 }
 
@@ -245,6 +248,8 @@ async function connect() {
 function renderLimits() {
   const limits = state.limits;
   $('q-count').textContent = questionCount();
+  document.querySelectorAll('.q-count').forEach(
+    (node) => { node.textContent = questionCount(); });
   if (!limits) return;
   $('suggest-sheets').textContent = limits.suggested_sheets_per_batch;
   $('suggest-pages').textContent =
@@ -503,6 +508,49 @@ function renderGrid() {
   host.append(el('table', {}, [el('thead', {}, [head]), body]));
 }
 
+/* The same rules the server enforces, checked here so a typo surfaces while
+   the key is being written rather than after a batch of scans has been
+   uploaded and refused. Returns a sentence, or '' if the cell is fine. */
+function cellProblem(cell) {
+  if (!cell || cell === VOID) return '';
+  const letters = state.limits ? state.limits.options : 'ABCDE';
+  const alternatives = cell.split('|');
+  if (alternatives.some((item) => item === '')) {
+    return 'has a stray "|". Write alternatives as A|BD, with a letter on ' +
+           'each side of it';
+  }
+  for (const alternative of alternatives) {
+    for (const letter of alternative) {
+      if (!letters.includes(letter)) {
+        return 'contains "' + letter + '", which is not one of ' +
+               letters.split('').join('/');
+      }
+    }
+    if (new Set(alternative).size !== alternative.length) {
+      return 'repeats a letter';
+    }
+  }
+  const seen = alternatives.map((item) => item.split('').sort().join(''));
+  if (new Set(seen).size !== seen.length) {
+    return 'lists the same answer twice';
+  }
+  return '';
+}
+
+function firstKeyProblem() {
+  for (const test of namedTests()) {
+    for (let index = 0; index < test.answers.length; index++) {
+      const problem = cellProblem(test.answers[index]);
+      if (problem) {
+        return 'Test ' + (test.id ? "'" + test.id + "'" : test.name) +
+               ', question ' + (index + 1) + ': "' + test.answers[index] +
+               '" ' + problem + '.';
+      }
+    }
+  }
+  return '';
+}
+
 function csvCell(value) {
   const text = String(value == null ? '' : value);
   return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
@@ -574,11 +622,16 @@ function updateKeyMessage() {
   }
   if (clauses.length) lines.push(clauses.join(', ') + '.');
 
+  const problem = firstKeyProblem();
   let kind = 'ok';
+  if (problem) {
+    kind = 'bad';
+    lines.push(problem);
+  }
   if (!withId.length) {
-    kind = '';
+    kind = problem ? 'bad' : '';
   } else if (complete.length < withId.length) {
-    kind = 'warn';
+    kind = problem ? 'bad' : 'warn';
     lines.push(complete.length + ' of ' + withId.length + ' ' +
                plural(withId.length, 'test has', 'tests have') +
                ' a full set of ' + need + ' answers.');
@@ -597,10 +650,13 @@ function updateKeyMessage() {
     !answersExist || (!!state.keySource && !overwritten.length);
   $('undo-key').hidden = !state.undo;
 
-  setStep('step-key', withId.length > 0 && complete.length === withId.length,
+  setStep('step-key',
+          withId.length > 0 && complete.length === withId.length && !problem,
           'hint-key',
-          withId.length ? complete.length + ' of ' + withId.length + ' complete'
-                        : 'No answers yet');
+          problem ? 'Check the answers'
+                  : withId.length
+                    ? complete.length + ' of ' + withId.length + ' complete'
+                    : 'No answers yet');
   save();
 }
 
@@ -812,7 +868,7 @@ function batchCard(batch, index) {
     return card;
   }
 
-  const host = el('label');
+  const host = el('span');
   const picker = filePicker(host, {
     accept: '.pdf,.png,.jpg,.jpeg,.tif,.tiff', multiple: true,
     label: 'Choose scan',
@@ -875,10 +931,14 @@ function batchCard(batch, index) {
       batch.files = body.files
         .filter((item) => item.encoding === 'utf-8')
         .map((item) => ({ name: item.name, type: item.type, data: item.data }));
+      // PDFs are too big to keep in localStorage, so they are handed to the
+      // browser once and dropped. Record their names, because that download
+      // is the only copy the operator will ever get.
+      const pdfs = body.files.filter((item) => item.encoding === 'base64');
+      batch.pdfs = pdfs.map((item) => item.name.split('/').pop());
       save();
-      body.files.filter((item) => item.encoding === 'base64')
-        .forEach((item) => download(item.name.split('/').pop(),
-                                    fileFromServer(item)));
+      pdfs.forEach((item) => download(item.name.split('/').pop(),
+                                      fileFromServer(item)));
       renderBatches();
     } catch (error) {
       message.className = 'msg bad';
@@ -919,10 +979,19 @@ function summaryView(batch) {
     box.append(el('div', { className: 'msg warn' },
       [summary.test_not_allowed + ' ' +
        plural(summary.test_not_allowed, 'row is', 'rows are') +
-       ' for a test that student’s Latin level may not sit.']));
+       ' for a test that student’s Latin level may not take.']));
   }
 
   box.append(fileList(batch.files));
+
+  if (batch.pdfs && batch.pdfs.length) {
+    box.append(el('p', { className: 'note', textContent:
+      plural(batch.pdfs.length, 'A marked-up scan was', 'Marked-up scans were') +
+      ' sent to this browser’s downloads folder (' +
+      batch.pdfs.join(', ') + '). They are too large to keep on this page, so ' +
+      'that download is the only copy — everything else listed above ' +
+      'stays here and can be downloaded again.' }));
+  }
   return box;
 }
 
@@ -970,7 +1039,7 @@ function reviewCard(batch) {
   const reviewFiles = batch.files.filter(
     (item) => /Unclear|Missing/.test(item.name));
 
-  const host = el('label');
+  const host = el('span');
   const picker = filePicker(host, { accept: '.csv', multiple: true,
                                     label: 'Choose corrections' });
   const go = el('button', { className: 'primary',

@@ -86,10 +86,23 @@ def _text_centered(c: pdfcanvas.Canvas, x_in: float, y_in: float, string: str,
     c.drawCentredString(x_in * inch, y_in * inch, string, charSpace=char_space)
 
 
+#: Outline weight for every bubble, in points. Set explicitly on each one
+#: rather than inherited from whatever the canvas was last left at: the reader
+#: measures a disc slightly smaller than the bubble, and a heavier ring spills
+#: into that disc and raises the darkness of an *empty* bubble. Measured on a
+#: 200 dpi render, a blank bubble reads 0.037 at this weight and 0.145 at 1.0,
+#: so a mixture of the two would split the blank cluster in half and drag the
+#: calibrated review threshold up with it.
+BUBBLE_LINE_WIDTH = 0.6
+
+
 def _bubble(c: pdfcanvas.Canvas, column: int, row: int, filled: bool = False):
     x, y = layout.cell_to_inches(column + 0.5, row + 0.5)
     r = layout.bubble_radius_in()
+    c.saveState()
+    c.setLineWidth(BUBBLE_LINE_WIDTH)
     c.circle(x * inch, y * inch, r * inch, stroke=1, fill=1 if filled else 0)
+    c.restoreState()
 
 
 def _label_in_cell(c: pdfcanvas.Canvas, column: int, row: int, string: str,
@@ -246,9 +259,12 @@ def _write_in_lines(c: pdfcanvas.Canvas, text: layout.SheetText):
         _, y = layout.cell_to_inches(0, 21.6 + (offset * 2.6))
         _text(c, left, y, caption, size=9, font=SERIF_BOLD)
         label_width = c.stringWidth(caption, SERIF_BOLD, 9) / 72
+        # Scoped, so the rest of the page is not drawn at this weight.
+        c.saveState()
         c.setLineWidth(0.6)
         c.line((left + label_width + 0.06) * inch, (y - 0.025) * inch,
                right * inch, (y - 0.025) * inch)
+        c.restoreState()
 
 
 def _directions(c: pdfcanvas.Canvas, text: layout.SheetText):

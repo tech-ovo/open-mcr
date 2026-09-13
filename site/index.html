@@ -134,9 +134,6 @@
   .filebtn input[type=file] { position: absolute; width: 1px; height: 1px;
                               opacity: 0; pointer-events: none; }
   .filebtn .pick { font-weight: 600; white-space: nowrap; }
-  .filebtn .chosen { color: var(--ink-faint); font-family: var(--mono);
-                     font-size: .84rem; overflow: hidden; text-overflow: ellipsis;
-                     white-space: nowrap; }
 
   .msg { padding: .6rem .8rem; border-radius: 7px; margin: .8rem 0;
          font-size: .92rem; border: 1px solid transparent; white-space: pre-wrap; }
@@ -192,6 +189,37 @@
           color: var(--ink-soft); }
   .stat b { display: block; font: 700 1.25rem var(--sans); color: var(--ink); }
 
+  /* The orientation panel above step 1, and the collapsed detail boxes. */
+  .intro { background: var(--card); border: 1px solid var(--line);
+           border-radius: var(--radius); padding: 1.1rem 1.15rem;
+           margin-bottom: 1.6rem; }
+  .intro h2 { font: 600 .82rem var(--sans); margin: 0 0 .5rem;
+              text-transform: uppercase; letter-spacing: .07em;
+              color: var(--ink-faint); }
+  .intro ol { margin: 0 0 1rem; }
+  .intro > :last-child { margin-bottom: 0; }
+  .intro .where { border-top: 1px solid var(--line-soft); padding-top: .9rem; }
+
+  details.tech { border: 1px solid var(--line); border-radius: 8px;
+                 margin: .9rem 0 0; }
+  details.tech > summary { cursor: pointer; padding: .5rem .75rem;
+                           font-size: .88rem; font-weight: 600;
+                           color: var(--ink-soft); }
+  details.tech > summary:hover { color: var(--accent); }
+  details.tech[open] > summary { border-bottom: 1px solid var(--line-soft); }
+  details.tech .body { padding: .8rem .9rem; }
+
+  /* Examples of what one answer cell may hold. */
+  .cells { width: auto; margin-bottom: .85rem; }
+  .cells td { vertical-align: baseline; border: 0; padding: .18rem .5rem .18rem 0; }
+  .cells td:first-child { font-family: var(--mono); font-weight: 700;
+                          white-space: nowrap; color: var(--accent); }
+
+  /* A file input and, beside it, what was chosen. */
+  .picker { display: inline-flex; align-items: center; gap: .55rem;
+            flex-wrap: wrap; }
+  .picker .chosen { color: var(--ink-faint); font-size: .85rem; }
+
   footer { margin-top: 2.5rem; padding-top: 1.4rem;
            border-top: 1px solid var(--line);
            font-size: .88rem; color: var(--ink-soft); }
@@ -213,13 +241,34 @@
   </p>
 </header>
 
+<section class="intro">
+  <h2>How this works</h2>
+  <ol>
+    <li><strong>Connect</strong> to the grading server. Once per browser.</li>
+    <li><strong>Design and print the answer sheet.</strong> Do this first: the
+      sheet itself does not depend on the tests or the answers.</li>
+    <li><strong>List the tests and enter the answer keys.</strong> This can wait
+      until after the exam if you would rather.</li>
+    <li><strong>Scan the completed sheets</strong> and upload them here, in
+      batches of about 25.</li>
+    <li><strong>Fix anything unclear</strong>, and download the results.</li>
+  </ol>
+  <p class="note where">
+    <strong>Where data is stored:</strong> Your setup, answer keys, thresholds,
+    and results are saved locally in this browser on this device. Uploaded scan
+    PDFs are temporarily sent to the grading server for processing, then
+    deleted; they are not retained on the server.
+  </p>
+</section>
+
 <!-- 1 ------------------------------------------------------------------ -->
 <details class="step" id="step-connect" open>
   <summary><span class="num"><span>1</span></span>
     <span class="title">Connect to the grading server</span>
     <span class="hint" id="hint-connect">Not connected</span></summary>
   <div class="body">
-    <p class="note">Both values are saved, so you only do this once.</p>
+    <p class="note">Both values are saved, so you only do this once per
+      browser.</p>
     <div class="grid2">
       <label><span class="lab">Server address</span>
         <span class="sub">The Modal endpoint, ending in <code>.modal.run</code></span>
@@ -267,11 +316,16 @@
     <div class="msg" id="msg-sheet"></div>
 
     <h3>Printing</h3>
-    <p class="note">
-      Print <strong>double-sided</strong>, flipping on the long edge, at 100%
-      scale. "Fit to page" also reads correctly, but it shrinks the bubbles for
-      no benefit. Do not print two pages to a sheet.
-    </p>
+    <ul class="note">
+      <li>Print <strong>double-sided</strong> (your printer may call this
+        <em>duplex</em>). <strong>Long-edge binding</strong> is the usual
+        choice; short-edge works too, because the reader corrects a page that
+        comes through upside down.</li>
+      <li>Use <strong>100% scale</strong> if possible. "Fit to page" is
+        acceptable if your printer requires it, but it makes the bubbles
+        smaller.</li>
+      <li>Do <strong>not</strong> print two pages to a sheet.</li>
+    </ul>
   </div>
 </details>
 
@@ -282,10 +336,12 @@
     <span class="hint" id="hint-tests">No tests yet</span></summary>
   <div class="body">
     <p class="note">
-      One row per test. The <strong>Test ID</strong> is the four-digit number a
-      student bubbles in to say which test the column belongs to, so it has to
-      match what is printed on the paper test. Leave the exclusions empty if
-      anyone may sit the test.
+      One row per test. <strong>Test ID:</strong> a unique 4-digit number for
+      this test. Print this number on the test booklet. Students bubble the
+      same number on their answer sheets. The numbers must match.
+    </p>
+    <p class="note">
+      Leave the exclusions empty if anyone may take the test.
     </p>
 
     <div class="scroll">
@@ -293,7 +349,7 @@
         <thead><tr>
           <th style="min-width:12rem">Test name</th>
           <th style="width:7rem">Test&nbsp;ID</th>
-          <th>Levels that may <em>not</em> sit it</th>
+          <th>Levels that may <em>not</em> take it</th>
           <th style="width:2.5rem"></th>
         </tr></thead>
         <tbody></tbody>
@@ -312,57 +368,103 @@
     <span class="title">Enter the answers</span>
     <span class="hint" id="hint-key">No answers yet</span></summary>
   <div class="body">
-    <p class="note">
-      The answers end up in one file, <code>Keys.csv</code>: a row for each of
-      the <span id="q-count">80</span> questions, a column for each test. It is
-      sent with every batch you grade, and you never have to touch it by hand
-      unless you want to. There are three ways to fill it in, and you can mix
-      them — they all write to the same grid at the bottom of this step.
+    <p>
+      Enter the correct answer for questions 1&ndash;<span id="q-count">80</span>
+      for each test.
     </p>
+    <p class="note" style="margin-bottom:.35rem">Choose one method:</p>
+    <ul class="note">
+      <li><strong>A. Type or paste answers directly</strong> &mdash; easiest
+        for most people.</li>
+      <li><strong>B. Upload a spreadsheet</strong> &mdash; useful if you
+        already have an answer key written down.</li>
+      <li><strong>C. Edit the grid</strong> &mdash; useful for reviewing, or
+        for changing individual answers.</li>
+    </ul>
 
-    <h3>Either: fill it in a spreadsheet</h3>
-    <p class="note">
-      Download the template, type the answers into the numbered rows in Excel
-      or Google Sheets, then bring the file back. Uploading does not throw away
-      the tests you already have: a column whose Test ID matches is updated,
-      and anything else is added.
-    </p>
-    <div class="row">
-      <button id="download-template">Download template</button>
-      <label class="filebtn" id="pick-key"></label>
-      <button id="undo-key" hidden>Undo upload</button>
-    </div>
-
-    <h3>Or: paste them in</h3>
+    <h3>A. Type or paste the answers</h3>
     <p class="note">
       One box per test. Separate the answers with spaces, commas or newlines,
       or paste one unbroken string like <code>ABCDE…</code>.
     </p>
     <div id="answers"></div>
 
-    <h3>Or: type them into the grid</h3>
+    <h3>B. Upload a spreadsheet</h3>
     <p class="note">
-      Every answer is editable here, whichever way it got in. An edited cell is
-      shown in <strong>bold</strong>.
+      Download the template, type the answers into the numbered rows in Excel
+      or Google Sheets, then bring the file back.
+    </p>
+    <div class="row">
+      <button id="download-template">Download template</button>
+      <span class="picker" id="pick-key"></span>
+      <button id="undo-key" hidden>Undo upload</button>
+    </div>
+
+    <h3>C. Edit the grid</h3>
+    <p class="note">
+      Every answer is editable here, however it got in. A cell you have typed
+      into is shown in <strong>bold</strong>.
     </p>
     <div class="answer-grid" id="answer-grid"></div>
 
     <h3>What goes in a cell</h3>
-    <ul class="note">
-      <li>One letter for the usual case: <code>C</code>.</li>
-      <li>Several letters mean <em>all</em> of them are required:
-        <code>ABD</code> is only right if the student marked A, B and D.</li>
-      <li>A <code>|</code> separates alternatives, and each alternative may be
-        several letters: <code>A|BD</code> accepts A on its own, or B and D
-        together.</li>
-      <li><code>X</code> leaves the question unscored — use it to retire a
-        question after the fact. It counts against nobody and appears in no
-        score.</li>
-      <li>A <code>-</code> marks a question you have not filled in yet. It is
-        how a gap keeps its place, so that question 41 stays question 41.</li>
-    </ul>
+    <table class="cells">
+      <tr><td>C</td>
+        <td>The answer is C. The student must fill C and nothing else.</td></tr>
+      <tr><td>ABD</td>
+        <td>The answer is A, B and D <em>together</em>. The student must fill
+          all three.</td></tr>
+      <tr><td>A|BD</td>
+        <td><em>Either</em> is accepted: A on its own, or B and D together.</td></tr>
+      <tr><td>X</td>
+        <td><strong>Exclude this question from scoring.</strong> Use this if you
+          discover after the test that a question should not count. It is right
+          for nobody and wrong for nobody, and it drops out of every total.</td></tr>
+      <tr><td>-</td>
+        <td>You have not entered this answer yet. It holds the place, so that
+          question 41 stays question 41.</td></tr>
+    </table>
+    <p class="note">
+      <code>X</code> and <code>-</code> are easy to mix up:
+      <strong><code>X</code> means the question is finished with and will not be
+      scored</strong>, while <code>-</code> just means you have not typed it in.
+    </p>
 
-    <div class="row">
+    <details class="tech">
+      <summary>Technical notes</summary>
+      <div class="body">
+        <ul class="note">
+          <li><strong>Case does not matter.</strong> <code>abd</code> and
+            <code>ABD</code> are the same answer, and so are <code>x</code> and
+            <code>X</code>.</li>
+          <li><strong>Order does not matter.</strong> <code>BD</code> and
+            <code>DB</code> are the same answer.</li>
+          <li><strong>More than two alternatives are fine.</strong>
+            <code>A|B|CD</code> accepts A, or B, or C and D together. There is
+            no limit on how many you list.</li>
+          <li><strong>A repeated letter is an error.</strong> <code>AA</code> is
+            rejected, as is a stray <code>|</code> such as <code>A|</code>, and
+            any letter outside A&ndash;E. These stop the run rather than grade
+            against a key that cannot mean what it says, so they are caught
+            here before you upload any scans.</li>
+          <li><strong>You can mix the three methods.</strong> They all write to
+            the same answers &mdash; paste a test, then correct one cell in the
+            grid, then upload a spreadsheet for a fourth test. Most people will
+            not need to.</li>
+          <li><strong>Uploading merges, it does not replace.</strong> A column
+            whose Test ID matches a test you already have updates that test;
+            anything else is added. Tests not mentioned in the file are left
+            alone, and <strong>Undo upload</strong> puts everything back.</li>
+          <li><strong>The file is <code>Keys.csv</code>.</strong> The field
+            names run down the first column (Name, Test ID, Excluded, then 1 to
+            <span class="q-count">80</span>) with one further column per test.
+            It is the same file the command-line version takes with
+            <code>--key</code>.</li>
+        </ul>
+      </div>
+    </details>
+
+    <div class="row" style="margin-top:.9rem">
       <button class="primary" id="download-key" hidden>Download Keys.csv</button>
     </div>
     <div class="msg" id="msg-key"></div>
@@ -376,19 +478,27 @@
     <span class="hint" id="hint-thresholds">Automatic</span></summary>
   <div class="body">
     <p class="note">
-      The server automatically determines a cutoff for deciding whether a
-      bubble counts. It measures it from each batch of scans, so a different
-      scanner needs no adjustment.
+      Every bubble is measured for darkness on a scale from 0 (blank paper) to
+      1 (solid black). A bubble darker than the <strong>cutoff</strong> counts
+      as filled. One that lands between the <strong>review threshold</strong>
+      and the cutoff is too close to call, so it is counted neither way and
+      goes to step 7 for a person to decide. Anything fainter is ignored.
+    </p>
+    <p class="note">
+      Where those two lines fall depends on the scanner, the paper and how hard
+      the students pressed, so the server measures them from each batch of
+      scans rather than using fixed numbers. There is a pair for the answer
+      bubbles and a pair for the ID bubbles. You should not need to touch any
+      of this.
     </p>
     <label class="inline">
       <input type="checkbox" id="thr-override"> Override thresholds (not recommended)
     </label>
     <div id="thr-manual" hidden style="margin-top:.9rem">
       <p class="note">
-        Every number measures darkness, from 0 (blank paper) to 1 (solid
-        black). A bubble above the cutoff counts as filled, and one between the
-        review threshold and cutoff is sent for review. Leave a box empty to
-        compute it automatically.
+        A <em>higher</em> number is stricter: it demands a darker mark. Leave a
+        box empty to compute that one automatically — you can pin one number
+        and let the other three be measured.
       </p>
       <div class="grid2">
         <label><span class="lab">Answer cutoff</span>
@@ -413,26 +523,56 @@
     <span class="title">Scan and grade</span>
     <span class="hint" id="hint-grade">Nothing graded</span></summary>
   <div class="body">
-    <h3>At the scanner</h3>
+    <h3>At the scanner: required</h3>
     <ul>
-      <li>Scan <strong>double-sided</strong>, front page first, so every sheet
-        is two consecutive pages.</li>
-      <li>200–300 dpi. Color, grayscale or black and white all work.</li>
-      <li><strong>Turn off</strong> auto-rotate, deskew, auto-crop and blank
-        page removal. Blank page removal will quietly drop a lightly-marked
-        page and throw the whole batch out of order.</li>
+      <li>Scan each sheet as <strong>two consecutive PDF pages: front first,
+        back second</strong>. Do not scan all fronts first and all backs
+        afterward. The run stops if the pages do not alternate, rather than
+        grade the wrong back against the wrong front.</li>
+      <li><strong>Turn off blank page removal.</strong> It will quietly drop a
+        lightly-marked page and throw the whole batch out of order.</li>
+      <li><strong>Do not crop into the four corner marks.</strong> The reader
+        finds the grid from them, so a tight auto-crop can make a page
+        unreadable.</li>
+    </ul>
+
+    <h3>At the scanner: recommended</h3>
+    <ul>
+      <li>200–300 dpi. Color, grayscale or black and white all work; grayscale
+        keeps the files small.</li>
+      <li>Deskew and auto-rotate can be left on or off. The reader straightens
+        the page itself and corrects one that comes through sideways or upside
+        down, so neither setting will break a batch.</li>
       <li>Save one PDF per batch of about
         <strong><span id="suggest-sheets">25</span> sheets</strong>. Your
         scanner can usually do this for you — set it to start a new file every
         <span id="suggest-pages">50</span> pages.</li>
     </ul>
+
+    <h3>How big a batch</h3>
     <p class="note" id="limit-note"></p>
+    <p class="note">
+      The megabytes are the real limit; 25 sheets is just what that usually
+      works out to. At 300 dpi grayscale a page is roughly half a megabyte, so
+      25 sheets — 50 pages — lands near 25 MB, comfortably inside. Color, or
+      600 dpi, is several times larger, and fewer sheets will fit. This page
+      checks the size before it uploads and tells you if it is too big, so you
+      can scan in smaller pieces and add each as its own batch.
+    </p>
 
     <h3>Grading</h3>
     <p class="note">
       One batch per PDF. Each is graded on its own and keeps its own results,
       so you can start grading the first stack while the rest is still being
-      scanned. A batch cannot be re-graded once it is done — add a new one.
+      scanned.
+    </p>
+    <p class="note">
+      A batch cannot be re-graded once it is done, but that is rarely what you
+      want anyway. <strong>If something was read wrong or the key was wrong,
+      fix it in step 7</strong> — that re-scores the batch from the results it
+      already has, without re-reading the scans. Only if the paper itself needs
+      re-reading (a page was missing, or the scan was bad) do you need to scan
+      again and <strong>add it as a new batch</strong>.
     </p>
     <div class="row" style="margin-bottom:.8rem">
       <button id="add-batch">Add a batch</button>
@@ -468,14 +608,21 @@
 
     <h3>Google Sheets is optional</h3>
     <p class="note">
-      Any editor that saves CSV will do — Excel, Numbers, even a text editor.
-      Google Sheets is worth the setup if more than one person is correcting, or
-      if you would rather have checkboxes than type <code>TRUE</code>: the
-      script below adds them, restores leading zeros on the Student IDs, fits
-      the columns and trims the blank rows.
+      <strong>Any editor that saves CSV will do</strong> — Excel, Numbers, even
+      a text editor. Nothing here needs Google Sheets.
+    </p>
+    <p class="note">
+      <strong>Sheets is worth setting up when several people are correcting at
+      once.</strong> That is the point of it: everyone opens the same file and
+      works through different rows at the same time, and you download it once
+      at the end. The script below is a convenience on top of that — it adds
+      checkboxes so nobody has to type <code>TRUE</code>, restores the leading
+      zeros on Student IDs that a spreadsheet would otherwise eat, fits the
+      columns, and trims the blank rows.
     </p>
     <ol class="note">
-      <li>Make a Google Sheet you will reuse for the whole event.</li>
+      <li>Make a Google Sheet you will reuse for the whole event, and share
+        it with whoever is helping.</li>
       <li><strong>Extensions → Apps Script</strong>, paste in
         <a href="review_sheet.gs" download>review_sheet.gs</a>, and Save.</li>
       <li>Click the <strong>Triggers</strong> (clock) icon →
@@ -499,14 +646,6 @@
 </details>
 
 <footer>
-  <p>
-    Nothing you upload is kept on the server. Each batch is unpacked into a
-    temporary folder, graded, and deleted before the results come back — there
-    is no database and no file store behind this page. Your tests, answers,
-    thresholds and results are held in <em>this browser</em>, on this device, so
-    you can close the page and come back to it. Scans are never stored on either
-    side.
-  </p>
   <p>
     <a href="https://github.com/ovo-amo/open-mcr">Source code and the
     command-line version</a>. Licensed under the GPL v3, with no warranty:
