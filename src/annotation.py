@@ -45,6 +45,27 @@ def _ring(image: np.ndarray, circle: tp.Tuple[float, float, float],
                lineType=cv2.LINE_AA)
 
 
+def _box(image: np.ndarray,
+         circles: tp.Sequence[tp.Tuple[float, float, float]],
+         color: tp.Tuple[int, int, int]):
+    """Outline the whole run of bubbles a field is made of.
+
+    Used where there is no single bubble to point at - a required field that
+    came back blank - so the gap itself is what gets marked.
+    """
+    if not circles:
+        return
+    radius = max(circle[2] for circle in circles)
+    pad = radius * 0.55
+    left = int(round(min(circle[0] for circle in circles) - radius - pad))
+    right = int(round(max(circle[0] for circle in circles) + radius + pad))
+    top = int(round(min(circle[1] for circle in circles) - radius - pad))
+    bottom = int(round(max(circle[1] for circle in circles) + radius + pad))
+    thickness = max(int(round(radius * RING_FRACTION)), 2)
+    cv2.rectangle(image, (left, top), (right, bottom), color, thickness,
+                  lineType=cv2.LINE_AA)
+
+
 def _legend(image: np.ndarray, heading: str, scored: bool):
     height, width = image.shape[:2]
     scale = width / 1700.0
@@ -57,8 +78,9 @@ def _legend(image: np.ndarray, heading: str, scored: bool):
     entries = ([(CORRECT_COLOR, "correct"),
                 (INCORRECT_COLOR, "marked, not correct")] if scored else
                []) + [(READ_COLOR, "read as filled"),
-                      (UNCLEAR_COLOR, "unclear (ringed on the question "
-                                      "number) - see review sheet")]
+                      (UNCLEAR_COLOR,
+                       "needs a person: ringed on the question number if "
+                       "unclear, boxed if a required field is blank")]
     for color, text in entries:
         cv2.circle(image, (x, y), radius, color, -1, lineType=cv2.LINE_AA)
         x += radius * 2
@@ -75,9 +97,13 @@ def _legend(image: np.ndarray, heading: str, scored: bool):
                     max(int(round(1.3 * scale)), 1), cv2.LINE_AA)
 
 
-def annotate_page(image: np.ndarray, scan, thresholds, key, heading: str,
+def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
                   tests_before: int = 0, only_tests=None) -> np.ndarray:
-    """Draw one page's reading onto a copy of the scan."""
+    """Draw one page's reading onto a copy of the scan.
+
+    ``keys`` maps a test number to the key it was scored against, so each
+    column on the page is marked against its own answers.
+    """
     annotated = image.copy()
     if annotated.ndim == 2:
         annotated = cv2.cvtColor(annotated, cv2.COLOR_GRAY2BGR)
@@ -91,6 +117,10 @@ def annotate_page(image: np.ndarray, scan, thresholds, key, heading: str,
         if group.is_answer:
             continue
         chosen = group.selected(thresholds)
+        # Nothing filled in a field that needs a value: box the whole group, so
+        # the empty column is visible rather than merely unmarked.
+        if group.required and not chosen:
+            _box(annotated, group.circles, UNCLEAR_COLOR)
         for label, fill, circle in zip(group.labels, group.fills,
                                        group.circles):
             if label in chosen:
@@ -104,6 +134,7 @@ def annotate_page(image: np.ndarray, scan, thresholds, key, heading: str,
         if only_tests is not None and \
                 tests_before + column_index + 1 not in only_tests:
             continue
+        key = keys.get(tests_before + column_index + 1) if keys else None
         accepted_for = key.answers if key is not None else None
         for index, group in enumerate(questions):
             chosen = group.selected(thresholds)
@@ -142,14 +173,17 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
     output_folder.mkdir(parents=True, exist_ok=True)
 
     # Which key applies to each (file, page)? Take it from the graded rows.
-    key_for_page: tp.Dict[tp.Tuple[str, int], tp.Any] = {}
+    # Keyed by test, not by page: the back page carries two tests, and giving
+    # both of them the first row's key marks the second one against the wrong
+    # answers.
+    key_for_test: tp.Dict[tp.Tuple[str, int, int], tp.Any] = {}
     id_for_page: tp.Dict[tp.Tuple[str, int], str] = {}
     for row in rows:
         id_for_page.setdefault((row.source_file, row.page), row.student_id)
         # row.key is the one the row was actually scored against; a Test ID
         # can name more than one.
         if row.key is not None:
-            key_for_page.setdefault((row.source_file, row.page), row.key)
+            key_for_test[(row.source_file, row.page, row.test_number)] = row.key
 
     pages_by_file: tp.Dict[pathlib.Path, tp.List] = {}
     tests_before: tp.Dict[tp.Tuple[pathlib.Path, int], int] = {}
@@ -183,12 +217,19 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
                             student = id_for_page.get((path.name, index + 1))
                             if student:
                                 heading += f"   Student ID {student}"
+                            before = tests_before.get((path, index), 0)
+                            keys_here = {
+                                number: key_for_test[(path.name, index + 1,
+                                                      number)]
+                                for number in range(
+                                    before + 1,
+                                    before + len(scan.tests) + 1)
+                                if (path.name, index + 1,
+                                    number) in key_for_test
+                            }
                             annotated = annotate_page(
                                 image, scan, thresholds_by_file[path],
-                                key_for_page.get((path.name, index + 1)),
-                                heading,
-                                tests_before.get((path, index), 0),
-                                only_tests)
+                                keys_here, heading, before, only_tests)
                             spool_path = spool / f"{len(spooled):05d}.jpg"
                             cv2.imwrite(str(spool_path), annotated,
                                         [int(cv2.IMWRITE_JPEG_QUALITY), 85])

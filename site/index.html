@@ -100,6 +100,8 @@
   p { margin: 0 0 .85rem; }
   ul, ol { margin: 0 0 .85rem; padding-left: 1.3rem; }
   li { margin-bottom: .3rem; }
+  /* Sub-points belong to the line above them, not to the gap below it. */
+  li > ul, li > ol { margin: .3rem 0 0; }
   .note { color: var(--ink-soft); font-size: .92rem; }
   a { color: var(--accent); }
 
@@ -210,16 +212,23 @@
 
   .batch { border: 1px solid var(--line); border-radius: 8px;
            padding: .8rem .9rem; margin-bottom: .8rem; }
-  .batch h4 { margin: 0 0 .5rem; font: 600 .98rem var(--sans); }
+  .batch h4 { margin: 0; font: 600 .98rem var(--sans); }
+  /* The title and its Remove button share a line, with room between them. */
+  .batch-head { display: flex; align-items: center; justify-content: space-between;
+                gap: 1rem; margin-bottom: .7rem; }
   .bar { height: 6px; background: var(--line-soft); border-radius: 3px;
          overflow: hidden; margin: .55rem 0; }
   .bar > i { display: block; height: 100%; background: var(--accent); width: 0;
              transition: width .25s; }
   .files { list-style: none; padding: 0; margin: .5rem 0 0; }
-  .files li { display: flex; gap: .5rem; align-items: center; padding: .2rem 0;
-              border-bottom: 1px solid var(--line-soft); font-size: .88rem; }
+  .files li { display: flex; gap: .5rem; align-items: center; padding: .3rem 0;
+              border-bottom: 1px solid var(--line-soft); font-size: .88rem;
+              min-height: 2.1rem; }
+  .files li button { flex: 0 0 auto; }
   .files li:last-child { border-bottom: 0; }
   .files .name { flex: 1; font-family: var(--mono); font-size: .85rem; }
+  .files .tag { margin-left: .5rem; font-family: var(--sans);
+                font-size: .78rem; color: var(--good); }
   .stat { display: inline-block; margin: 0 1.1rem .3rem 0; font-size: .88rem;
           color: var(--ink-soft); }
   .stat b { display: block; font: 700 1.25rem var(--sans); color: var(--ink); }
@@ -445,6 +454,12 @@
       or paste one unbroken string like <code>ABCDE…</code>.
     </p>
     <div id="answers"></div>
+    <div class="row">
+      <button id="tidy-answers">Tidy the answers</button>
+      <button id="undo-tidy" hidden>Undo tidy</button>
+      <span class="note">Rewrites every box as one space-separated line, so
+        you can see what the page made of a paste.</span>
+    </div>
 
     <div class="or">or</div>
 
@@ -667,8 +682,10 @@
     <p class="note">
       Each file asks for one correction per row. Open it, check the paper, fill
       in the answer, mark the row <strong>Done</strong>, and upload it below.
-      Every row has to be marked Done — an untouched row means nobody has
-      looked at it, and the upload is refused.
+      Every row needs it: the <code>Done</code> column has to read
+      <code>TRUE</code>, which is what a ticked checkbox saves as. In a plain
+      editor, type <code>TRUE</code> yourself. A row left blank means nobody
+      has looked at it, and the upload is refused.
     </p>
 
     <h3>Google Sheets is optional</h3>

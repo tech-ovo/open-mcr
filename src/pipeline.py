@@ -53,6 +53,10 @@ class TestRow:
     needs_review: bool = False
 
     test_name: str = ""
+    test_number: int = 0
+    """Which test on the sheet this row is, counted from 1 across both sides.
+    Not written to Results.csv; it is here so the marked-up scans can put each
+    test's own key on its own column."""
     status: str = STATUS_OK
     key: tp.Optional[keys_module.Key] = None
     """The key this row was scored against. Not written to Results.csv; it is
@@ -445,6 +449,7 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
                     student_id=student_id,
                     latin_level=latin_level,
                     test_id=test_id,
+                    test_number=test_number,
                     marked=marked,
                     needs_review=needs_review))
 

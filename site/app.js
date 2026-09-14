@@ -29,6 +29,7 @@ function blank() {
     keyCsv: '',
     keySource: null,             // {file, count} once a file has been loaded
     undo: null,                  // {tests, keySource} as they were before an upload
+    tidyUndo: null,              // paste boxes as they were before a tidy
     thresholdMode: 'auto',
     threshold: { as: '', ar: '', ms: '', mr: '' },
     annotate: false,
@@ -121,6 +122,15 @@ function say(id, kind, text) {
 
 function plural(count, one, many) {
   return count === 1 ? one : many;
+}
+
+/* "a", "a and b", "a, b, and c" - without the quotes quotedList adds. */
+function quotedPlain(items) {
+  const list = (items || []).slice();
+  if (!list.length) return 'unclear or missing';
+  if (list.length === 1) return list[0];
+  if (list.length === 2) return list[0] + ' or ' + list[1];
+  return list.slice(0, -1).join(', ') + ', or ' + list[list.length - 1];
 }
 
 /* "'1001'", "'1001' and '1002'", "'1001', '1002', and '1003'". */
@@ -597,6 +607,51 @@ function answersToText(answers) {
   return list.map((item) => item || GAP).join(' ');
 }
 
+/* Answers copied out of a PDF or a printed key usually arrive numbered, and
+   often in column order:
+
+     1. B   5. B   9. C  13. C
+     2. D   6. C  10. A  14. B
+
+   so each answer has to go where its number says, not where it appears. Any
+   punctuation between the number and the letters is ignored. Returns the
+   answers plus a complaint about anything that could not be read, which the
+   box below shows rather than swallowing. */
+function parseNumbered(raw, need) {
+  const answers = [];
+  const seen = new Map();
+  const problems = [];
+  let matched = 0;
+  // number, any punctuation or space, then the answer letters.
+  const pattern = /(\d+)[^A-Za-z0-9]*([A-Za-z|]+)/g;
+  let match;
+  while ((match = pattern.exec(raw)) !== null) {
+    matched += match[0].length;
+    const number = Number(match[1]);
+    const letters = match[2].toUpperCase();
+    if (number < 1 || number > need) {
+      problems.push('question ' + number + ' is outside 1\u2013' + need);
+      continue;
+    }
+    if (seen.has(number) && seen.get(number) !== letters) {
+      problems.push('question ' + number + ' is given twice, as "' +
+                    seen.get(number) + '" and "' + letters + '"');
+      continue;
+    }
+    seen.set(number, letters);
+    while (answers.length < number) answers.push('');
+    answers[number - 1] = letters === GAP ? '' : letters;
+  }
+
+  // Whatever the pattern did not consume should be nothing but separators.
+  const leftover = raw.replace(pattern, ' ').replace(/[\s,;.:()|-]+/g, '');
+  if (leftover) {
+    problems.push('could not read "' + leftover.slice(0, 24) + '"');
+  }
+  if (!matched) problems.push('no numbered answers found');
+  return { answers: answers, problems: problems };
+}
+
 /* Accept "A B C", "A,B,C", one per line, or one unbroken "ABC" string. */
 function textToAnswers(raw) {
   const text = (raw || '').trim();
@@ -612,6 +667,13 @@ function textToAnswers(raw) {
     parts = text.split('');
   }
   return parts.map((item) => (item === GAP ? '' : item.toUpperCase()));
+}
+
+/* Numbered when the text holds digits, positional when it does not. */
+function readPaste(raw) {
+  const text = (raw || '').trim();
+  if (/[0-9]/.test(text)) return parseNumbered(text, questionCount());
+  return { answers: textToAnswers(text), problems: [] };
 }
 
 function answered(test) {
@@ -630,6 +692,7 @@ function testLabel(test) {
 function renderAnswers() {
   const host = $('answers');
   host.textContent = '';
+  renderTidyButtons();
   const tests = namedTests();
   if (!tests.length) {
     host.append(el('p', { className: 'note',
@@ -640,17 +703,24 @@ function renderAnswers() {
     const box = el('textarea', { rows: 3, value: answersToText(test.answers),
                                  placeholder: 'A B C D E …' });
     const count = el('span', { className: 'note' });
-    const refresh = () => {
+    const refresh = (problems) => {
       const have = answered(test);
       const need = questionCount();
+      if (problems && problems.length) {
+        count.textContent = have + ' of ' + need + ' answers \u2014 ' +
+                            problems.slice(0, 2).join('; ') + '.';
+        count.style.color = 'var(--bad)';
+        return;
+      }
       count.textContent = have + ' of ' + need + ' answers';
       count.style.color = have === need ? 'var(--good)'
                         : have ? 'var(--warn)' : 'var(--ink-faint)';
     };
     box.oninput = () => {
-      test.answers = textToAnswers(box.value).slice(0, questionCount());
+      const read = readPaste(box.value);
+      test.answers = read.answers.slice(0, questionCount());
       test.dirty = true;
-      save(); refresh(); renderGrid(); updateKeyMessage();
+      save(); refresh(read.problems); renderGrid(); updateKeyMessage();
     };
     refresh();
     host.append(el('label', {}, [
@@ -661,6 +731,42 @@ function renderAnswers() {
 
 /* One row per question, one column per test. Rebuilt only when the shape
    changes — a keystroke writes into the array and leaves the DOM alone. */
+/* Rewrites every paste box in the canonical form: one line, space
+   separated, with a dash wherever an answer is still missing. The answers
+   themselves are already parsed, so this only changes what is shown - which
+   is the point, since it shows what the parser made of a messy paste. */
+function tidyAnswers() {
+  const boxes = Array.from(document.querySelectorAll('#answers textarea'));
+  state.tidyUndo = boxes.map((box) => box.value);
+  save();
+  renderAnswers();
+  renderTidyButtons();
+  say('msg-key', 'ok',
+      'Rewritten as the page reads them. A dash marks a question with no ' +
+      'answer yet.');
+}
+
+function undoTidy() {
+  const boxes = Array.from(document.querySelectorAll('#answers textarea'));
+  (state.tidyUndo || []).forEach((text, index) => {
+    if (!boxes[index]) return;
+    boxes[index].value = text;
+    boxes[index].dispatchEvent(new Event('input'));
+  });
+  state.tidyUndo = null;
+  save();
+  renderTidyButtons();
+  say('msg-key', '', '');
+}
+
+function renderTidyButtons() {
+  const tidy = $('tidy-answers');
+  if (!tidy) return;
+  const any = state.tests.some((test) => answered(test) > 0);
+  tidy.disabled = !any;
+  $('undo-tidy').hidden = !state.tidyUndo;
+}
+
 function renderGrid() {
   const host = $('answer-grid');
   const need = questionCount();
@@ -892,6 +998,7 @@ function updateKeyMessage() {
     !answersExist || (!!state.keySource && !overwritten.length);
   $('download-key-row').classList.toggle('empty', $('download-key').hidden);
   $('undo-key').hidden = !state.undo;
+  renderTidyButtons();
 
   setStep('step-key',
           withId.length > 0 && complete.length === withId.length && !problem,
@@ -1183,9 +1290,10 @@ function renderBatches() {
 
 function batchCard(batch, index) {
   const card = el('div', { className: 'batch' });
-  const title = el('h4', {}, ['Batch ' + batch.n]);
   const message = el('div', { className: 'msg' });
   const results = el('div');
+  const header = (extra) => el('div', { className: 'batch-head' },
+    [el('h4', {}, ['Batch ' + batch.n])].concat(extra || []));
 
   // Once a batch is graded it is a record of a run that happened, with its own
   // key and thresholds. Re-running it with today's settings would quietly
@@ -1197,7 +1305,7 @@ function batchCard(batch, index) {
                    'Anything not downloaded is lost.')) return;
       state.batches.splice(index, 1); save(); renderBatches();
     };
-    card.append(title, el('div', { className: 'row' }, [drop]), results);
+    card.append(header(drop), results);
     results.append(summaryView(batch));
     return card;
   }
@@ -1285,7 +1393,7 @@ function batchCard(batch, index) {
     }
   };
 
-  card.append(title, el('div', { className: 'row' }, [host, go, drop]),
+  card.append(header(), el('div', { className: 'row' }, [host, go, drop]),
               bar, message, results);
   return card;
 }
@@ -1298,10 +1406,11 @@ function summaryView(batch) {
 
   box.append(el('div', {}, [
     stat(summary.sheets, 'sheets'),
-    stat(summary.rows, 'result rows'),
+    stat(summary.rows, 'tests'),
     stat(summary.unclear, 'unclear'),
     stat(summary.missing, 'missing'),
-    stat(batch.seconds ? batch.seconds.toFixed(0) + ' s' : '—', 'to grade'),
+    stat(batch.seconds ? batch.seconds.toFixed(0) + ' s' : '—',
+         'processing time'),
   ]));
 
   if (summary.test_not_found) {
@@ -1336,23 +1445,46 @@ function summaryView(batch) {
   box.append(fileList(batch.files));
 
   if (batch.pdfs && batch.pdfs.length) {
-    box.append(el('p', { className: 'note', textContent:
+    const many = batch.pdfs.length !== 1;
+    const names = [];
+    batch.pdfs.forEach((name, index) => {
+      if (index) names.push(', ');
+      names.push(el('code', { textContent: name }));
+    });
+    box.append(el('p', { className: 'note' }, [
       plural(batch.pdfs.length, 'A marked-up scan was', 'Marked-up scans were') +
-      ' sent to this browser’s downloads folder (' +
-      batch.pdfs.join(', ') + '). They are too large to keep on this page, so ' +
-      'that download is the only copy — everything else listed above ' +
-      'stays here and can be downloaded again.' }));
+      ' sent to this browser\u2019s downloads folder (',
+      ...names,
+      '). ' + (many ? 'They are' : 'It is') +
+      ' too large to keep on this page, so that download is the only copy ' +
+      '\u2014 everything else listed above stays here and can be downloaded ' +
+      'again.',
+    ]));
   }
   return box;
 }
 
+/* Results first, then anything needing attention, then the reference
+   material - Calibration.txt last, since it is only read when a run looks
+   wrong. */
+function byUsefulness(files) {
+  const rank = (item) => (/Results\.csv/.test(item.name) ? 0
+                        : /Unclear|Missing/.test(item.name) ? 1
+                        : /Question Stats/.test(item.name) ? 2 : 3);
+  return files.slice().sort((a, b) => rank(a) - rank(b));
+}
+
 function fileList(files) {
   const list = el('ul', { className: 'files' });
-  files.forEach((item) => {
+  byUsefulness(files).forEach((item) => {
     const get = el('button', { textContent: 'Download' });
-    get.onclick = () => download(item.name.split('/').pop(), item.data, item.type);
-    list.append(el('li', {}, [
-      el('span', { className: 'name', textContent: item.name }), get]));
+    get.onclick = () => download(item.name.split('/').pop(), item.data,
+                                 item.type);
+    const name = el('span', { className: 'name', textContent: item.name });
+    if (item.updated) {
+      name.append(el('span', { className: 'tag', textContent: '(updated)' }));
+    }
+    list.append(el('li', {}, [name, get]));
   });
   return list;
 }
@@ -1362,31 +1494,75 @@ function fileList(files) {
 function renderReview() {
   const host = $('review-batches');
   host.textContent = '';
-  const pending = state.batches.filter(
-    (batch) => batch.summary &&
-               (batch.summary.unclear || batch.summary.missing));
+  const graded = state.batches.filter((batch) => batch.summary);
 
-  if (!state.batches.some((batch) => batch.summary)) {
+  if (!graded.length) {
     host.append(el('p', { className: 'note',
                           textContent: 'Grade a batch first.' }));
     setStep('step-review', false, 'hint-review', 'Nothing to review');
     return;
   }
-  if (!pending.length) {
-    host.append(el('p', { className: 'msg ok', textContent:
-      'Every mark was read confidently. There is nothing to fix.' }));
-    setStep('step-review', true, 'hint-review', 'All clear');
-    return;
-  }
 
-  pending.forEach((batch) => host.append(reviewCard(batch)));
-  setStep('step-review', false, 'hint-review',
-          pending.length + ' ' + plural(pending.length, 'batch', 'batches') +
-          ' to fix');
+  graded.forEach((batch) => host.append(reviewCard(batch)));
+  const pending = graded.filter(outstanding);
+  setStep('step-review', !pending.length, 'hint-review',
+          pending.length
+            ? pending.length + ' ' +
+              plural(pending.length, 'batch', 'batches') + ' to fix'
+            : 'All clear');
+}
+
+/* What this batch still needs a person for. A kind stops counting once a
+   corrected file of that kind has been applied. */
+function outstanding(batch) {
+  const done = (batch.updated && batch.updated.kinds) || [];
+  const kinds = [];
+  if (batch.summary.unclear && !done.includes('unclear')) kinds.push('unclear');
+  if (batch.summary.missing && !done.includes('missing')) kinds.push('missing');
+  return kinds.length ? kinds : null;
+}
+
+/* The originals, with anything the re-score replaced marked as updated and
+   put in its place. Files the re-score did not produce - Calibration.txt -
+   stay exactly as they were rather than disappearing. */
+function currentFiles(batch) {
+  const fresh = new Map(
+    ((batch.updated && batch.updated.files) || []).map(
+      (item) => [item.name.split('/').pop(), item]));
+  const merged = batch.files.map((item) => {
+    const name = item.name.split('/').pop();
+    return fresh.has(name)
+      ? Object.assign({}, fresh.get(name), { updated: true })
+      : item;
+  });
+  const known = new Set(batch.files.map((item) => item.name.split('/').pop()));
+  fresh.forEach((item, name) => {
+    if (!known.has(name)) merged.push(Object.assign({}, item, { updated: true }));
+  });
+  return merged;
+}
+
+/* A file whose first column starts Name / Test ID is an answer key, not a
+   sheet of corrections, so it is sent as one. */
+async function sortUploads(files) {
+  const overrides = [];
+  let key = null;
+  for (const file of files) {
+    let head = '';
+    try {
+      head = (await file.text()).slice(0, 400);
+    } catch (error) {
+      console.warn('Could not read', file.name, error);
+    }
+    if (/(^|\n)\s*"?Test\s*ID"?\s*,/i.test(head)) key = file;
+    else overrides.push(file);
+  }
+  return { overrides: overrides, key: key };
 }
 
 function reviewCard(batch) {
   const card = el('div', { className: 'batch' });
+  const kinds = outstanding(batch);
   const reviewFiles = batch.files.filter(
     (item) => /Unclear|Missing/.test(item.name));
 
@@ -1396,6 +1572,23 @@ function reviewCard(batch) {
   const go = el('button', { className: 'primary',
                             textContent: 'Apply and re-score' });
   const message = el('div', { className: 'msg' });
+  const results = el('div');
+
+  const showResults = () => {
+    results.textContent = '';
+    if (!batch.updated) return;
+    const applied = batch.updated.applied;
+    results.append(
+      el('p', { className: 'msg ok', textContent:
+        'Success! No more marks are ' +
+        quotedPlain(batch.updated.kinds) + '. ' +
+        applied + ' ' + plural(applied, 'correction', 'corrections') +
+        ' applied, ' + batch.updated.scored + ' rows re-scored.' }),
+      el('p', { className: 'note', textContent:
+        'These are the current results for batch ' + batch.n +
+        '. The copies in step 6 are left as they were first graded.' }),
+      fileList(currentFiles(batch)));
+  };
 
   go.onclick = async () => {
     const files = Array.from(picker.files || []);
@@ -1413,11 +1606,14 @@ function reviewCard(batch) {
     message.className = 'msg info';
     message.textContent = 'Re-scoring. The scans are not needed for this.';
 
+    const sorted = await sortUploads(files);
     const form = new FormData();
     form.append('results', new Blob([batch.results], { type: 'text/csv' }),
                 'Results.csv');
-    files.forEach((file) => form.append('overrides', file, file.name));
-    if (state.keyCsv) {
+    sorted.overrides.forEach((file) => form.append('overrides', file, file.name));
+    if (sorted.key) {
+      form.append('key', sorted.key, 'Keys.csv');
+    } else if (state.keyCsv) {
       form.append('key', new Blob([state.keyCsv], { type: 'text/csv' }),
                   'Keys.csv');
     }
@@ -1428,20 +1624,28 @@ function reviewCard(batch) {
       const resultsFile = body.files.find(
         (item) => item.name.endsWith('Results.csv'));
       if (resultsFile) batch.results = resultsFile.data;
-      batch.files = body.files.filter((item) => item.encoding === 'utf-8')
-        .map((item) => ({ name: item.name, type: item.type, data: item.data }));
-      batch.summary = Object.assign({}, batch.summary, {
-        unclear: 0, missing: 0,
-        scored: body.summary.scored,
-        statuses: body.summary.statuses,
+      // The batch as graded is left alone; the re-scored files live here.
+      const settled = (batch.updated && batch.updated.kinds || []).slice();
+      sorted.overrides.forEach((file) => {
+        if (/Unclear/i.test(file.name) && !settled.includes('unclear')) {
+          settled.push('unclear');
+        }
+        if (/Missing/i.test(file.name) && !settled.includes('missing')) {
+          settled.push('missing');
+        }
       });
+      batch.updated = {
+        files: body.files.filter((item) => item.encoding === 'utf-8')
+          .map((item) => ({ name: item.name, type: item.type,
+                            data: item.data })),
+        applied: body.summary.corrections_applied,
+        scored: body.summary.scored,
+        kinds: settled.length ? settled : ['unclear', 'missing'],
+      };
       save();
-      const applied = body.summary.corrections_applied;
-      message.className = 'msg ok';
-      message.textContent =
-        applied + ' ' + plural(applied, 'correction', 'corrections') +
-        ' applied, ' + body.summary.scored + ' rows scored. Download the ' +
-        'updated Results.csv above.';
+      message.className = 'msg';
+      message.textContent = '';
+      showResults();
       renderBatches();
     } catch (error) {
       message.className = 'msg bad';
@@ -1451,14 +1655,24 @@ function reviewCard(batch) {
     }
   };
 
+  const heading = kinds
+    ? batch.summary.unclear + ' unclear, ' + batch.summary.missing +
+      ' missing. Download these, correct them, then bring them back.'
+    : batch.updated
+      ? 'Already settled. The corrected files are below; upload more to ' +
+        're-score again.'
+      : 'Nothing was left unclear or missing in this batch.';
+
   card.append(
-    el('h4', {}, ['Batch ' + batch.n]),
-    el('p', { className: 'note', textContent:
-      batch.summary.unclear + ' unclear, ' + batch.summary.missing +
-      ' missing. Download these, correct them, then bring them back.' }),
-    fileList(reviewFiles),
-    el('div', { className: 'row', style: 'margin-top:.6rem' }, [host, go]),
-    message);
+    el('div', { className: 'batch-head' }, [el('h4', {}, ['Batch ' + batch.n])]),
+    el('p', { className: 'note', textContent: heading }));
+  if (reviewFiles.length) card.append(fileList(reviewFiles));
+  if (kinds || batch.updated) {
+    card.append(
+      el('div', { className: 'row', style: 'margin-top:.6rem' }, [host, go]),
+      message, results);
+  }
+  showResults();
   return card;
 }
 
@@ -1518,9 +1732,19 @@ function start() {
     download('Keys.csv', state.keyCsv, 'text/csv');
   };
   const keyHost = $('pick-key');
-  filePicker(keyHost, { accept: '.csv', label: 'Upload Keys.csv' });
+  const keyInput = filePicker(keyHost, { accept: '.csv',
+                                         label: 'Upload Keys.csv' });
   keyHost.onpicked = (files) => { if (files[0]) uploadKey(files[0]); };
-  $('undo-key').onclick = undoUpload;
+  $('undo-key').onclick = () => {
+    undoUpload();
+    // Leaving the filename showing next to the box would suggest the file is
+    // still in effect, and re-picking the same one would fire no change event.
+    keyInput.value = '';
+    const chosen = keyHost.querySelector('.chosen');
+    if (chosen) chosen.textContent = 'no file uploaded';
+  };
+  $('tidy-answers').onclick = tidyAnswers;
+  $('undo-tidy').onclick = undoTidy;
 
   $('thr-override').onchange = () => {
     state.thresholdMode = $('thr-override').checked ? 'manual' : 'auto';

@@ -400,9 +400,15 @@ something needs a person. See the next step.
 
 **`Annotated/`** — with `--annotate`, a copy of every scan with every bubble
 the reader acted on ringed: green for the key's answer, red for a wrong
-choice, blue for a mark read with no key to judge it. Anything sent to review
-has its **question number** ringed in amber rather than its five options,
-which would say nothing about which bubble is the problem. The ID, Latin level
+choice, blue for a mark read with no key to judge it. Each test column is
+marked against **its own** key, which matters on the back page, where two
+tests sit side by side.
+
+Amber means a person is needed, and it takes two shapes. A mark too faint to
+call has its **question number** ringed, rather than its five options, which
+would say nothing about which bubble is the problem. A required field that
+came back **blank** — a Student ID digit nobody filled in, say — has the whole
+column **boxed**, since there is no bubble to point at. The ID, Latin level
 and Test ID bubbles are ringed too, so the whole reading is visible at a
 glance.
 
@@ -663,10 +669,10 @@ domain.
 | **1. Connect** | Endpoint and passphrase, or an invite link that carries both (see below). The page asks the server how the sheet is laid out — how many tests, questions, Student ID digits and Latin levels — so the rest of the form matches the real sheet rather than a hardcoded copy of it. |
 | **2. Design and print the answer sheet** | The title, the directions, the write-in labels, and the Latin levels — rename them, or add and remove them between 2 and 10. Generates the printable PDF. Wording only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
 | **3. List the tests** | A row per test — name, Test ID, and which Latin levels may take it. Test IDs are zero-padded to four digits when you leave the box, and two tests may share an ID when their levels do not overlap. |
-| **4. Enter the answers** | Three ways into the same data, and you can mix them: download the template and fill it in a spreadsheet, paste a whole test's answers at once, or type into the grid of every question. `Keys.csv` is offered back whenever it holds work that is not already in a file you have. Uploading merges by Test ID rather than replacing, and there is an Undo. |
+| **4. Enter the answers** | Three ways into the same data, and you can mix them: download the template and fill it in a spreadsheet, paste a whole test's answers at once, or type into the grid of every question. A paste may be numbered and out of order — `1. B  5. B  9. C` straight out of a PDF works, each answer going where its number says — and anything unreadable is named rather than dropped. `Keys.csv` is offered back whenever it holds work that is not already in a file you have. Uploading merges by Test ID rather than replacing, and there is an Undo. |
 | **5. Advanced** | The per-run choices, all of them optional: which tests to grade, whether to produce marked-up scans, and the thresholds (automatic per batch; tick the override to pin the four numbers, individually or together, exactly as `--threshold` does). The step summary says what has been changed away from the defaults. |
 | **6. Scan and grade** | The scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. |
-| **7. Fix unclear marks** | `Unclear.csv` and `Missing.csv` per batch, the upload that feeds the corrections back and re-scores without the scans, and the optional Apps Script for people who would rather work in Google Sheets. |
+| **7. Fix unclear marks** | One card per graded batch: its `Unclear.csv` and `Missing.csv`, the upload that feeds corrections back and re-scores without the scans, and the optional Apps Script for people who would rather work in Google Sheets. The re-scored files stay **here**, tagged `(updated)`, and the batch in step 6 is left exactly as it was first graded — so there is one place to look for the latest results and one place to look for what the scans originally said. Files a re-score does not regenerate, such as `Calibration.txt`, are carried through rather than dropped. An uploaded `Keys.csv` is recognised and used as the key instead of as a sheet of corrections. |
 
 ### Batch size
 
