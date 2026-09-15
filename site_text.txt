@@ -43,7 +43,7 @@ Up to 12 lines, each at most 86 characters.
 2 Design and print the answer sheet Default wording
 You can change the wording and Latin levels. The bubbles and corner marks are fixed. Reprint after any change.
 Latin levels
-One bubble each, printed top to bottom in this order. A key refers to them by these names, so renaming one here renames it everywhere.
+Allowed or excluded tests use these names, so renaming one here renames it everywhere.
 Add a level
 Remove the last
 Write-in lines
@@ -52,7 +52,7 @@ Directions
 Generate PDF
 Reset wording
 Copy a link with this design
-That link is the step 1 invite plus everything on this page. Anyone grading these sheets needs the same design, because the reader works from it — so send this one rather than the plain invite once you have changed anything here.
+That link contains the invite from step 1 as well as everything in this step. Send this link rather than the plain invite if you have customized any woridng.
 Printing
 Print double-sided (your printer may call this duplex).
 Use 100% scale if possible. "Fit to page" is acceptable if your printer requires it, but it makes the bubbles smaller.
@@ -77,22 +77,21 @@ Enter the correct answer for questions 1–80 for each test.
 Pick one of the two options.
 A. Type or paste directly (easiest).
 B. Upload a spreadsheet.
-C. Edit the grid — you can also review or change answers here.
 A. Type or paste the answers
-One box per test. Separate the answers with spaces, commas or newlines, or paste one unbroken string like ABCDE….
+Paste directly into each box, and it will try to parse whatever you have.
 Tidy the answers
 Undo tidy
 B. Upload a spreadsheet
-Download the template, type the answers into the numbered rows in Excel or Google Sheets, then bring the file back.
+Download the template, type the answers, then bring the file back.
 Download template
 Undo upload
-C. Review answers (optional)
-Every answer is editable here, however it got in. A cell you have typed into is shown in bold.
+Review answers (optional)
+Every answer is editable here. Edited cells are shown in bold.
 What goes in a cell
 C
 The answer is C.
 ABD
-The answer is A, B and D. The student must fill all three.
+The answer is A, B and D. The student must bubble all three.
 A|BD
 Either is accepted: A on its own, or B and D together.
 X
@@ -105,17 +104,15 @@ Case does not matter. abd and ABD are the same answer, and so are x and X.
 Order does not matter. BD and DB are the same answer.
 More than two alternatives are fine. A|B|CD accepts A, or B, or C and D together. There is no limit on how many you list.
 A repeated letter is an error. AA is rejected, as is a stray | such as A|, and any letter outside A–E.
-A and B can be mixed. They write to the same answers, and the grid shows whatever is there.
+Options A and B can be mixed. They write to the same answers, and the grid shows whatever is there.
 Uploading merges, instead of replacing. A column whose Test ID matches a test you already have updates that test; anything else is added. Tests not mentioned in the file are left alone, and Undo upload puts everything back.
-The file is Keys.csv. The field names run down the first column (Name, Test ID, Excluded, then 1 to 80) with one further column per test.
+The file is Keys.csv. The first column has headers Name, Test ID, Excluded, then 1 to 80, with one further column per test.
 Excluded may be written as Allowed instead, naming the levels that may sit each test rather than the ones that may not. Use one row or the other, not both. Excluded is left blank by default, which bars nobody and stays right when you add or rename a Latin level later.
 Download Keys.csv
 
 ======================================================================
 STEP 5 - Advanced
 ======================================================================
-Which papers
-Marking up a whole convention makes a document nobody reads
 Student IDs
 Separated by commas
 Answer cutoff
@@ -123,13 +120,13 @@ Answer review threshold
 ID cutoff
 ID review threshold
 5 Advanced Defaults
-Nothing here needs changing for an ordinary run. It is all remembered, and applies to every batch you grade from now on.
+You don't need to change this for most runs.
 Which tests to grade
-Every test on the sheet, unless you say otherwise. Untick one and its columns are not read at all: no results, no answer key needed, and nothing on the review sheets. Useful when a test is scored elsewhere, or when its key is not ready yet.
+Every test on the sheet is graded by default. An unticked test is not read at all: no results, no answer key needed, and nothing on the review sheets. Useful when a test is scored elsewhere, or when its key is not ready yet.
 Which sides were scanned
-Both, unless you say otherwise. Scanning one side only is for when a test is being re-marked on its own: the pages are then read one at a time instead of in front-and-back pairs, and a page of the other side is set aside rather than read. The front carries Test 1 and the back carries Tests 2 and 3, so a side you leave out takes its tests with it.
+Scanning one side only is for when a test is being re-marked on its own: the pages are then read one at a time instead of in front-and-back pairs, and a page of the other side is set aside rather than read. The front carries Test 1 and the back carries Tests 2 and 3, so a side you leave out takes its tests with it.
 Skip blank pages
-A duplex scanner produces an empty page for the back of a one-sided original, giving printed, blank, printed, blank. With this on those empty pages are passed over; with it off each one is reported as something that should not be there. Either way, a blank page turning up where a printed one should be is flagged, so a sheet that missed the feeder is not mistaken for one that was meant to be empty.
+A duplex scanner produces an empty page for the back of a one-sided original, giving printed, blank, printed, blank. With this setting on, those empty pages are skipped. With it off, each one is reported as something that should not be there.
 Marked-up scans
 Mark-up scan
 Marked-up scans show which bubbles were read as filled, along with the correct answer. They make a run noticeably slower, so leave this off unless you are demoing or debugging.
@@ -137,12 +134,12 @@ Every paper
 Only where the Student ID could not be read
 Only these Student IDs…
 Thresholds
-Every bubble is measured for darkness on a scale from 0 (blank paper) to 1 (solid black). A bubble darker than the cutoff counts as filled. One that lands between the review threshold and the cutoff is too close to call, so it is counted neither way and goes to step 7 for a person to decide. Anything fainter is ignored.
-Where those two lines fall depends on the scanner, the paper and how hard the students pressed, so the server measures them from each batch of scans rather than using fixed numbers.
+Every bubble is measured for darkness on a scale from 0 (blank paper) to 1 (solid black). A bubble darker than the cutoff counts as filled. One that lands between the review threshold and the cutoff goes to step 7 for a person to decide. Anything fainter is ignored.
+Where those two cutoffs fall depends on the scanner, the paper, and how hard the students pressed. So the server measures them from each batch of scans rather than using fixed numbers.
 Override thresholds (not recommended)
 A higher number is stricter: it demands a darker mark. Leave a box empty to compute that one automatically — you can pin one number and let the other three be measured.
 After a run, Calibration.txt shows the computed thresholds, so you can copy those numbers here to repeat it.
-04275, 04276
+06767, 06768
 automatic
 
 ======================================================================
@@ -166,10 +163,10 @@ Add a batch
 STEP 7 - Fix unclear marks
 ======================================================================
 7 Fix unclear marks Nothing to review
-Two kinds of thing reach this step. Unclear is a bubble too faint to call — the reader neither counts it nor ignores it, and asks instead. Missing is a required field it could not read at all. A question left blank is not an error: that is the student's choice.
-Each file asks for one correction per row. Open it, check the paper, fill in the answer, mark the row Done, and upload it below. The Done column has to read TRUE, which is what a ticked checkbox saves as; in a plain editor, type TRUE yourself. A row you have not ticked is left exactly as it was and comes back as a shorter file to finish next time, so you can do half now and half later.
+An unclear bubble is too faint to be definitively filled. A missing bubble is a required field it could not read at all. A question left blank is not an error: that is the student's choice.
+Each file asks for one correction per row. Open it, check the paper, fill in the answer, mark the row Done, and upload it below. The Done column should read TRUE. A row you have not ticked is left exactly as it was and comes back as a shorter file to finish next time, so you can do half now and half later.
 Correcting something that was never flagged
-You can add rows as well as fill them in. A student whose answer was read confidently but wrongly — a stray mark read as an answer, say — never reaches these files, and a row you write by hand is how to fix it.
+You can add rows too. A student whose answer was read confidently wrong never reaches these files, and a row you write by hand is how to fix it.
 A row needs enough of File, Page, Test, Test ID and Student ID to pick out exactly one test. The Student ID and the Test ID normally do it. Then the question number and the answer:
 Student ID
 Question
@@ -178,15 +175,15 @@ B
 D
 E
 Done
-04275
-1002
+06767
+1067
 17
 FALSE
 TRUE
-That says: on student 04275’s test 1002, question 17 is B. Leave every option FALSE to record that the student answered nothing. If a row names no test, or names more than one, it is reported back rather than guessed at.
+That says: on student 06767’s test 1067, question 17 is B. Leave every option FALSE to record that the student answered nothing. If a row names no test, or names more than one, it is reported back rather than guessed at.
 In Google Sheets, CAJCL → Add a correction row sets one up with the checkboxes already in place.
 Google Sheets is optional
-Any editor that saves CSV will do — Excel, Numbers, even a text editor. Nothing here needs Google Sheets.
+Any editor that saves CSV will do, even a text editor. Nothing here needs Google Sheets.
 Sheets is worth setting up when several people are correcting at once. Everyone opens the same file and works through different rows at the same time, and you download it once at the end. The script below is a convenience on top of that — it adds checkboxes so nobody has to type TRUE, restores the leading zeros on Student IDs that a spreadsheet would otherwise eat, fits the columns, and trims the blank rows.
 Create a Google Sheet shared with whoever is helping.
 Extensions → Apps Script, paste in Sheet.gs, and Save. It carries the Latin levels from step 2, so the dropdown it adds matches the sheet you printed.
