@@ -1148,6 +1148,124 @@ def test_ignoring_the_done_column_lets_an_unticked_sheet_through(tmp_path):
 # --- marked-up copies for only the papers worth checking -------------------
 
 
+def test_corners_can_be_recovered_from_where_the_batch_put_theirs():
+    """Two surviving corners fix how the page sits; the rest follow."""
+    from src import corner_finding, image_utils
+
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    front = ss.render_sheet(sheet)[0]
+    colour = cv2.cvtColor(front, cv2.COLOR_GRAY2BGR)
+    prior = reading.scan_page_either_side(colour, grid_info.form_cajcl).corners
+    assert prior and len(prior) == 4
+
+    prepared = image_utils.prepare_scan_for_processing(colour)
+    found = corner_finding.find_with_prior(prepared, prior, 0.75)
+    assert found is not None
+    height, width = prepared.shape[:2]
+    for point, (fraction_x, fraction_y) in zip(found, prior):
+        assert abs(point.x - fraction_x * width) < 3
+        assert abs(point.y - fraction_y * height) < 3
+
+
+def test_a_wrong_prior_is_refused_rather_than_forced():
+    """The batch may say where to look; it may not say what was found."""
+    from src import corner_finding, image_utils
+
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1")
+    colour = cv2.cvtColor(ss.render_sheet(sheet)[0], cv2.COLOR_GRAY2BGR)
+    prepared = image_utils.prepare_scan_for_processing(colour)
+    nonsense = ((0.30, 0.30), (0.70, 0.30), (0.70, 0.70), (0.30, 0.70))
+    assert corner_finding.find_with_prior(prepared, nonsense, 0.75) is None
+
+
+def test_a_page_read_off_the_batch_s_grid_is_flagged(tmp_path):
+    """A skewed page can pass every shape test and still be in the wrong
+    place. Only the rest of the batch can say so."""
+    sheets = [ss.SheetData(student_id=f"0427{index}", latin_level="MS-1",
+                           test_ids=TEST_IDS,
+                           answers=[cycled(0), cycled(1), cycled(2)])
+              for index in range(3)]
+    pages = []
+    for index, sheet in enumerate(sheets):
+        front, back = ss.render_sheet(sheet)
+        pages.extend([front, back])
+    scans = tmp_path / "scans"
+    scans.mkdir(parents=True, exist_ok=True)
+    ss.write_pdf(pages, scans / "batch.pdf")
+    result = pipeline.run(
+        pipeline.RunOptions(input_folder=scans,
+                            output_folder=tmp_path / "out"),
+        console.Console(enabled=False))
+    # Every page came off the same template, so nothing should be flagged.
+    assert not [report for report in result.reports
+                if "away from where the rest" in report.note]
+
+
+# --- the student who presses lightly ---------------------------------------
+
+
+def test_a_faintly_bubbled_test_is_read_on_its_own_terms(tmp_path):
+    """One light presser among normal ones must still be graded.
+
+    Their marks all sit under a cutoff drawn from a batch of people who
+    pressed properly, so without a second opinion the whole test comes back
+    blank or, at best, as eighty review rows.
+    """
+    normal = [ss.SheetData(student_id=f"0427{index}", latin_level="MS-1",
+                           test_ids=TEST_IDS,
+                           answers=[cycled(0), cycled(1), cycled(2)])
+              for index in range(2)]
+    # Every answer bubbled at a third of the usual darkness.
+    faint = ss.SheetData(student_id="04280", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)],
+                         faint={0: list(range(1, QUESTIONS + 1))},
+                         faint_fraction=0.33)
+    result, _ = grade(tmp_path, normal + [faint])
+
+    row = next(r for r in result.rows
+               if r.student_id == "04280" and r.test_number == 1)
+    read = "".join(sorted(marks)[0] if len(marks) == 1 else "?"
+                   for marks in row.marked)
+    assert read == "".join(cycled(0)), (
+        "the faint test was not read back correctly: " + read[:40])
+
+
+def test_a_normal_test_is_not_rescued(tmp_path):
+    """The rescue must stay out of the way when nothing is wrong."""
+    sheets = [ss.SheetData(student_id=f"0427{index}", latin_level="MS-1",
+                           test_ids=TEST_IDS,
+                           answers=[cycled(0), cycled(1), cycled(2)])
+              for index in range(2)]
+    result, out = grade(tmp_path, sheets)
+    assert not result.unclear
+    report = (out / th.CALIBRATION_FILENAME).read_text(encoding="utf-8")
+    assert "its own" not in report
+
+
+def test_marking_up_only_some_tests_does_not_crash(tmp_path):
+    """A page carrying none of the wanted tests still has to be drawn.
+
+    The legend used to read the key off the answer loop's last iteration, so a
+    page whose tests were all left out of the run raised UnboundLocalError and
+    took the whole request with it.
+    """
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    key = write_key(tmp_path / "k.csv", [
+        (name, test_id, "", answers) for name, test_id, answers in
+        zip(("One", "Two", "Three"), TEST_IDS,
+            (cycled(0), cycled(1), cycled(2)))])
+    # Test 1 is on the front, so the back page has nothing to draw.
+    result, out = grade(tmp_path, [sheet], key=key, annotate=True,
+                        tests=(1,))
+    assert result.annotated
+    assert [row.test_number for row in result.rows] == [1]
+
+
 def test_marked_up_copies_can_be_limited_to_unreadable_ids():
     from src import annotation
     assert annotation.wants_student("04275", None)

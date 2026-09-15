@@ -10,6 +10,7 @@ than quietly resolved.
 import typing as tp
 
 from . import corner_finding
+from . import geometry_utils
 from . import grid_info as grid_i
 from . import grid_reading as grid_r
 from . import image_utils
@@ -65,6 +66,11 @@ class PageScan(tp.NamedTuple):
     entry, and its question groups."""
 
     test_id_digits: tp.Tuple[tp.Tuple[BubbleGroup, ...], ...]
+
+    corners: tp.Optional[tp.Tuple[tp.Tuple[float, float], ...]] = None
+    """Where the grid was found, as fractions of the page. Kept so that a
+    page which cannot find its own corners can be retried against the median
+    of the pages that could."""
 
     @property
     def answer_fills(self) -> tp.List[float]:
@@ -156,13 +162,15 @@ def _build_grid(image: tp.Any, form_variant: grid_i.FormVariant,
         l_mark_offset=form_variant.l_mark_offset,
         # Only built if the ordinary rendering fails to find the corners.
         alternates=lambda: image_utils.darker_renderings(image))
-    return grid_r.Grid(corners,
+    grid = grid_r.Grid(corners,
                        form_variant.horizontal_cells,
                        form_variant.vertical_cells,
                        image_utils.dilate(prepared, save_path=debug_path),
                        basis_transformer=basis,
                        save_path=debug_path,
                        y_shift=getattr(form_variant, "y_shift", 0.0))
+    grid.found_corners = corner_finding.corner_fractions(corners, prepared)
+    return grid
 
 
 def _groups_for(grid: grid_r.Grid, form_variant: grid_i.FormVariant,
@@ -232,6 +240,14 @@ def _extract(grid: grid_r.Grid, form_variant: grid_i.FormVariant,
             # first option.
             centre, radius = grid.get_cell_circle(info.horizontal_start - 1,
                                                   info.vertical_start)
+            # A cell is wider than it is tall, and get_cell_circle sizes on
+            # the average of the two, so the ring came out taller than its
+            # row: several unclear questions in a row merged into one amber
+            # column. Keep it inside the row, and still wide enough to hold a
+            # two-digit number.
+            (_, _), (top, bottom) = grid.get_cell_range(
+                info.horizontal_start - 1, info.vertical_start)
+            radius = min(radius, abs(bottom - top) * 0.45)
             questions.append(
                 BubbleGroup(location=str(question_index + 1),
                             labels=tuple(
@@ -246,7 +262,8 @@ def _extract(grid: grid_r.Grid, form_variant: grid_i.FormVariant,
                                                      False, False)
         tests.append((first, tuple(questions)))
 
-    return PageScan(page_side=side,
+    return PageScan(corners=getattr(grid, "found_corners", None),
+                    page_side=side,
                     page_code=_page_code(grid, form_variant),
                     student_id=student_id,
                     latin_level=latin_groups[0] if latin_groups else None,
@@ -261,6 +278,38 @@ def scan_page(image: tp.Any, form_variant: grid_i.FormVariant,
     """Measure every bubble on a page of a known side. Applies no thresholds."""
     grid = _build_grid(image, form_variant, debug_path)
     return _extract(grid, form_variant, latin_levels, side=None)
+
+
+def scan_page_with_corners(image: tp.Any,
+                           form: grid_i.TwoSidedFormVariant,
+                           prior: tp.Sequence[tp.Tuple[float, float]],
+                           latin_levels: tp.Optional[tp.Sequence[str]] = None
+                           ) -> PageScan:
+    """Read a page using corners borrowed from the rest of the batch.
+
+    For the page that defeats shape-matching on its own - fed in crooked, or
+    with a mark somebody has drawn over - while two hundred of its neighbours
+    found theirs without trouble.
+    """
+    front = form.variant_for_page(0)
+    prepared = image_utils.prepare_scan_for_processing(image)
+    aspect = (front.basis_width / 2.0) / front.basis_height
+    found = corner_finding.find_with_prior(
+        prepared, prior, aspect, l_mark_offset=front.l_mark_offset)
+    if found is None:
+        raise corner_finding.CornerFindingError(
+            "Could not find the corner marks, even using where the rest of "
+            "the batch put theirs.")
+    basis = geometry_utils.ChangeOfBasisTransformer(
+        found[0], found[3], found[2], found[1])
+    grid = grid_r.Grid(found, front.horizontal_cells, front.vertical_cells,
+                       image_utils.dilate(prepared),
+                       basis_transformer=basis,
+                       y_shift=getattr(front, "y_shift", 0.0))
+    grid.found_corners = corner_finding.corner_fractions(found, prepared)
+    side = side_of_code(_page_code(grid, front))
+    variant = form.variant_for_page(side) if side is not None else front
+    return _extract(grid, variant, latin_levels, side)
 
 
 def scan_page_either_side(image: tp.Any, form: grid_i.TwoSidedFormVariant,

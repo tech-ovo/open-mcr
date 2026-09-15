@@ -52,10 +52,10 @@ Directions
 Generate PDF
 Reset wording
 Copy a link with this design
-That link contains the invite from step 1 as well as everything in this step. Send this link rather than the plain invite if you have customized any woridng.
+That link contains the invite from step 1 as well as everything in this step. Send this link rather than the plain invite if you have customized any wording.
 Printing
 Print double-sided (your printer may call this duplex).
-Use 100% scale if possible. "Fit to page" is acceptable if your printer requires it, but it makes the bubbles smaller.
+Use 100% scale if possible. ‘Fit to page’ is acceptable if your printer requires it, but it makes the bubbles smaller.
 Do not print two pages to a sheet.
 
 ======================================================================
@@ -120,7 +120,7 @@ Answer review threshold
 ID cutoff
 ID review threshold
 5 Advanced Defaults
-You don't need to change this for most runs.
+You don’t need to change this for most runs.
 Which tests to grade
 Every test on the sheet is graded by default. An unticked test is not read at all: no results, no answer key needed, and nothing on the review sheets. Useful when a test is scored elsewhere, or when its key is not ready yet.
 Which sides were scanned
@@ -130,9 +130,9 @@ A duplex scanner produces an empty page for the back of a one-sided original, gi
 Marked-up scans
 Mark-up scan
 Marked-up scans show which bubbles were read as filled, along with the correct answer. They make a run noticeably slower, so leave this off unless you are demoing or debugging.
-Every paper
-Only where the Student ID could not be read
-Only these Student IDs…
+Mark up every paper
+Mark up only where the Student ID could not be read
+Mark up only certain Student IDs
 Thresholds
 Every bubble is measured for darkness on a scale from 0 (blank paper) to 1 (solid black). A bubble darker than the cutoff counts as filled. One that lands between the review threshold and the cutoff goes to step 7 for a person to decide. Anything fainter is ignored.
 Where those two cutoffs fall depends on the scanner, the paper, and how hard the students pressed. So the server measures them from each batch of scans rather than using fixed numbers.
@@ -163,7 +163,7 @@ Add a batch
 STEP 7 - Fix unclear marks
 ======================================================================
 7 Fix unclear marks Nothing to review
-An unclear bubble is too faint to be definitively filled. A missing bubble is a required field it could not read at all. A question left blank is not an error: that is the student's choice.
+An unclear bubble is too faint to be definitively filled. A missing bubble is a required field it could not read at all. A question left blank is not an error: that is the student’s choice.
 Each file asks for one correction per row. Open it, check the paper, fill in the answer, mark the row Done, and upload it below. The Done column should read TRUE. A row you have not ticked is left exactly as it was and comes back as a shorter file to finish next time, so you can do half now and half later.
 Correcting something that was never flagged
 You can add rows too. A student whose answer was read confidently wrong never reaches these files, and a row you write by hand is how to fix it.
@@ -191,7 +191,7 @@ Click the Triggers (clock) icon → Add Trigger.
 source — From spreadsheet
 type — On change
 Save and accept the prompt.
-For each file: File → Import → Insert new sheet(s). It has to create a new sheet — "Replace current sheet" will not trigger the script.
+For each file: File → Import → Insert new sheet(s). It has to create a new sheet — ‘Replace current sheet’ will not trigger the script.
 When the sheet is finished, File → Download → Comma-separated values.
 Source code and the command-line version. Licensed under the GPL v3, with no warranty.
 Reset
@@ -230,7 +230,7 @@ Latin Literature
 At least one level has to be able to take each test.
 Remove this test
 question {number} is outside 1\u2013
-could not read "{leftover.slice(0, 24)}"
+could not read '{leftover.slice(0, 24)}'
 no numbered answers found
 Untitled test
 Add a test in step 3 first.
@@ -238,9 +238,9 @@ of {need} answers —
 of {need} answers
 Rewritten as the page reads them. A dash marks a question with no answer yet.
 Add a test in step 3 and its answers will appear here.
-has a stray "|" — write alternatives as A|BD, with a letter on each side of it
-contains "{letter}", which is not one of
-repeats a letter in "{alternative}"
+has a stray '|' — write alternatives as A|BD, with a letter on each side of it
+contains '{letter}', which is not one of
+repeats a letter in '{alternative}'
 lists the same answer twice
 , question {(index + 1)} {problem}.
 Every test needs a Test ID.
@@ -255,19 +255,21 @@ ready, {need} answers each.
 Check the answers
 of {withId.length} complete
 No answers yet
-There is no "Test ID" row in {filename}. The field names run down the first column: Name, Test ID, Excluded, then 1 to {questionCount()}.
-The "Test ID" row in {filename} is empty, so there is no test to load. Put each test's ID in that row, one per column.
-That file has both an "Allowed" row and an "Excluded" row. They say the same thing from opposite sides and can contradict each other, so keep whichever one you meant and delete the other.
-"{stray[0]}" in the {levelLabel} row is not one of this sheet’s Latin levels (
+There is no 'Test ID' row in {filename}. The first column has headers Name, Test ID, Excluded, then 1 to {questionCount()}.
+The 'Test ID' row in {filename} is empty, so there is no test to load. Put each test's ID in that row, one per column.
+That file has both an 'Allowed' row and an 'Excluded' row. They say the same thing from opposite sides and can contradict each other, so keep whichever one you meant and delete the other.
+'{stray[0]}' in the {levelLabel} row is not one of this sheet’s Latin levels (
 ). Check the spelling, or rename the level in step 2 first.
 The Excluded row bars every Latin level from "{(names[column] || id)}", so no student could sit it. Leave the cell blank to bar nobody, or name only the levels that may not sit it.
 already here
 not in that file, and
 left alone.
 Upload undone.
+not a Student ID. They are {read.digits} digits, so write them as numbers separated by commas.
 mark-up, some papers
 mark-up on
 thresholds fixed
+Could not clear stored PDFs
 Test {number))})
 Only the
 is being read, so each page is graded on its own.
@@ -277,8 +279,10 @@ At least one test has to be graded.
 Test {number} ({sideOfTest(number)})
 The {sideOfTest(number)} of the sheet is not in this scan.
 No batches yet.
+Show {hidden.length} hidden
 of {state.batches.length} graded
 Nothing graded
+and {(names.length - 1)} more
 Remove batch {batch.n} and its saved results? Anything not downloaded is lost.
 Choose scan
 Grade this batch
@@ -301,9 +305,14 @@ for a test that student’s Latin level may not take.
 graded in this batch.
 A marked-up scan was
 Marked-up scans were
-sent to this browser’s downloads folder (
-They are
-too large to keep on this page, so that download is the only copy — everything else listed above stays here and can be downloaded again.
+sent to this browser’s downloads folder.
+Copies are
+A copy is
+kept here too, so you can take
+This browser would not store
+a copy
+, so that download is the only one.
+This browser no longer has a copy of {item.name}. Grade the batch again to produce a new one.
 Grade a batch first.
 Nothing to review
 to fix

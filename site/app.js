@@ -685,7 +685,7 @@ function parseNumbered(raw, need) {
     }
     if (seen.has(number) && seen.get(number) !== letters) {
       problems.push('question ' + number + ' is given twice, as "' +
-                    seen.get(number) + '" and "' + letters + '"');
+                    seen.get(number) + "' and '" + letters + "'");
       continue;
     }
     seen.set(number, letters);
@@ -696,7 +696,7 @@ function parseNumbered(raw, need) {
   // Whatever the pattern did not consume should be nothing but separators.
   const leftover = raw.replace(pattern, ' ').replace(/[\s,;.:()|-]+/g, '');
   if (leftover) {
-    problems.push('could not read "' + leftover.slice(0, 24) + '"');
+    problems.push("could not read '" + leftover.slice(0, 24) + "'");
   }
   if (!matched) problems.push('no numbered answers found');
   return { answers: answers, problems: problems };
@@ -868,18 +868,18 @@ function cellProblem(cell) {
   const letters = state.limits ? state.limits.options : 'ABCDE';
   const alternatives = cell.split('|');
   if (alternatives.some((item) => item === '')) {
-    return 'has a stray "|" — write alternatives as A|BD, with a letter on ' +
+    return "has a stray '|' — write alternatives as A|BD, with a letter on " +
            'each side of it';
   }
   for (const alternative of alternatives) {
     for (const letter of alternative) {
       if (!letters.includes(letter)) {
-        return 'contains "' + letter + '", which is not one of ' +
+        return "contains '" + letter + "', which is not one of " +
                letters.split('').join('/');
       }
     }
     if (new Set(alternative).size !== alternative.length) {
-      return 'repeats a letter in "' + alternative + '"';
+      return "repeats a letter in '" + alternative + "'";
     }
   }
   const seen = alternatives.map((item) => item.split('').sort().join(''));
@@ -993,7 +993,7 @@ function updateKeyMessage() {
   const duplicate = clash ? clash.id : '';
   if (clash) {
     say('msg-tests', 'bad',
-        'Test ID ' + clash.id + ' is used by both "' + clash.first + '" and "' +
+        'Test ID ' + clash.id + " is used by both '" + clash.first + "' and '" +
         clash.second + '", and both accept ' + clash.levels.join(', ') +
         '. Two tests may share an ID only when the levels that may take them ' +
         'do not overlap.');
@@ -1121,15 +1121,15 @@ function readKeyCsv(text, filename) {
     const labels = rows.slice(0, 6).map((row) => row[0])
       .filter((item) => item !== '');
     throw new Error(
-      'There is no "Test ID" row in ' + filename + '. The field names run ' +
-      'down the first column: Name, Test ID, Excluded, then 1 to ' +
+      "There is no 'Test ID' row in " + filename + '. ' +
+      'The first column has headers Name, Test ID, Excluded, then 1 to ' +
       questionCount() + '.' +
       (labels.length ? '\n\nThe first column of that file starts: ' +
                        labels.join(', ') + '.' : ''));
   }
   if (!ids.some((id) => id !== '')) {
     throw new Error(
-      'The "Test ID" row in ' + filename + ' is empty, so there is no test to ' +
+      "The 'Test ID' row in " + filename + ' is empty, so there is no test to ' +
       'load. Put each test\'s ID in that row, one per column.');
   }
 
@@ -1139,7 +1139,7 @@ function readKeyCsv(text, filename) {
      the same rule the server applies. */
   if (rowFor('Allowed') && rowFor('Excluded')) {
     throw new Error(
-      'That file has both an "Allowed" row and an "Excluded" row. They say ' +
+      "That file has both an 'Allowed' row and an 'Excluded' row. They say " +
       'the same thing from opposite sides and can contradict each other, so ' +
       'keep whichever one you meant and delete the other.');
   }
@@ -1171,7 +1171,7 @@ function readKeyCsv(text, filename) {
     const stray = listed.filter((_, index) => positions[index] < 0);
     if (stray.length) {
       throw new Error(
-        '"' + stray[0] + '" in the ' + levelLabel + ' row is not one of this ' +
+        "'" + stray[0] + "' in the " + levelLabel + ' row is not one of this ' +
         'sheet\u2019s Latin levels (' + levels.join(', ') + '). Check the ' +
         'spelling, or rename the level in step 2 first.');
     }
@@ -1269,8 +1269,25 @@ function thresholdSpec() {
 function annotateSpec() {
   if (!state.annotate) return '';
   if (state.annotateWho === 'unknown') return 'unknown';
-  if (state.annotateWho === 'list') return (state.annotateIds || '').trim();
+  if (state.annotateWho === 'list') return readAnnotateIds().good.join(',');
   return '';
+}
+
+/* The Student IDs typed into the mark-up filter, and anything typed there
+   that cannot be one. Digits only: students bubble digits, so a word in this
+   box would silently match nobody. */
+function readAnnotateIds() {
+  const digits = state.limits ? state.limits.student_id_digits : 5;
+  const listed = (state.annotateIds || '').split(/[,;]/)
+    .map((item) => item.trim()).filter(Boolean);
+  const good = [];
+  const bad = [];
+  listed.forEach((item) => {
+    if (!/^[0-9?]+$/.test(item)) bad.push(item);
+    else if (item.length > digits) bad.push(item);
+    else good.push(item.padStart(digits, '0'));
+  });
+  return { good: good, bad: bad, digits: digits };
 }
 
 function renderAnnotateWho() {
@@ -1280,6 +1297,17 @@ function renderAnnotateWho() {
   $('annotate-students').value = state.annotateWho || '';
   $('annotate-list').hidden = state.annotateWho !== 'list';
   $('annotate-ids').value = state.annotateIds || '';
+
+  const read = readAnnotateIds();
+  const showing = state.annotate && state.annotateWho === 'list';
+  if (!showing || !read.bad.length) {
+    say('msg-annotate-ids', '', '');
+  } else {
+    say('msg-annotate-ids', 'bad',
+        quotedList(read.bad) + ' ' + plural(read.bad.length, 'is', 'are') +
+        ' not a Student ID. They are ' + read.digits +
+        ' digits, so write them as numbers separated by commas.');
+  }
 }
 
 function renderAdvancedHint() {
@@ -1306,6 +1334,98 @@ function renderThresholds() {
     $('thr-' + key).value = state.threshold[key] || '';
   });
   renderAdvancedHint();
+}
+
+/* --- keeping the marked-up PDFs ------------------------------------------
+
+   localStorage holds a few megabytes and the rest of the saved state has to
+   fit in it too, so the annotated scans live in IndexedDB instead. Every
+   call resolves rather than rejects: a browser with storage turned off, or a
+   private window, must still grade - it just cannot offer the file twice. */
+
+const PDF_DB = 'jcl-grading-pdfs';
+const PDF_STORE = 'pdfs';
+let pdfDatabase = null;
+
+function openPdfStore() {
+  if (pdfDatabase) return Promise.resolve(pdfDatabase);
+  return new Promise((resolve) => {
+    let request;
+    try {
+      request = indexedDB.open(PDF_DB, 1);
+    } catch (error) {
+      return resolve(null);
+    }
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PDF_STORE)) {
+        db.createObjectStore(PDF_STORE);
+      }
+    };
+    request.onsuccess = () => { pdfDatabase = request.result; resolve(pdfDatabase); };
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+}
+
+function pdfKey(batchNumber, name) {
+  return batchNumber + '/' + name;
+}
+
+async function keepPdf(batchNumber, name, blob) {
+  const db = await openPdfStore();
+  if (!db) return false;
+  return new Promise((resolve) => {
+    let transaction;
+    try {
+      transaction = db.transaction(PDF_STORE, 'readwrite');
+    } catch (error) {
+      return resolve(false);
+    }
+    transaction.objectStore(PDF_STORE).put(blob, pdfKey(batchNumber, name));
+    transaction.oncomplete = () => resolve(true);
+    transaction.onerror = () => resolve(false);
+    transaction.onabort = () => resolve(false);
+  });
+}
+
+async function readPdf(batchNumber, name) {
+  const db = await openPdfStore();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    let request;
+    try {
+      request = db.transaction(PDF_STORE, 'readonly')
+        .objectStore(PDF_STORE).get(pdfKey(batchNumber, name));
+    } catch (error) {
+      return resolve(null);
+    }
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => resolve(null);
+  });
+}
+
+async function dropPdfs(batchNumber) {
+  const db = await openPdfStore();
+  if (!db) return;
+  const batch = state.batches.find((item) => item.n === batchNumber);
+  const names = (batch && batch.pdfs) || [];
+  try {
+    const store = db.transaction(PDF_STORE, 'readwrite').objectStore(PDF_STORE);
+    names.forEach((name) => store.delete(pdfKey(batchNumber, name)));
+  } catch (error) {
+    console.warn('Could not clear stored PDFs', error);
+  }
+}
+
+async function dropEveryPdf() {
+  const db = await openPdfStore();
+  if (!db) return;
+  try {
+    db.transaction(PDF_STORE, 'readwrite').objectStore(PDF_STORE).clear();
+  } catch (error) {
+    console.warn('Could not clear stored PDFs', error);
+  }
 }
 
 // --- 6. grading ------------------------------------------------------------
@@ -1467,6 +1587,17 @@ function addBatch() {
   state.batches.push({ n: state.nextBatch++, summary: null, results: '',
                        files: [], seconds: 0, review: {} });
   save(); renderBatches();
+  // Newest first, so the card you just asked for is the one at the top. With
+  // a dozen batches above it, appending looked like nothing had happened.
+  const first = document.querySelector('#batches .batch');
+  if (first) first.scrollIntoView({ block: 'nearest' });
+}
+
+/* Newest first. The numbers still count upwards, so "batch 3" means the same
+   thing whichever end of the list it is at. */
+function batchOrder() {
+  return state.batches.map((batch, index) => ({ batch: batch, index: index }))
+    .reverse();
 }
 
 function renderBatches() {
@@ -1476,7 +1607,24 @@ function renderBatches() {
     host.append(el('p', { className: 'note',
                           textContent: 'No batches yet.' }));
   }
-  state.batches.forEach((batch, index) => host.append(batchCard(batch, index)));
+
+  const hidden = state.batches.filter((batch) => batch.hidden);
+  if (hidden.length) {
+    const show = el('button', { textContent:
+      'Show ' + hidden.length + ' hidden ' +
+      plural(hidden.length, 'batch', 'batches') });
+    show.onclick = () => {
+      state.batches.forEach((batch) => { batch.hidden = false; });
+      save(); renderBatches();
+    };
+    host.append(el('div', { className: 'row', style: 'margin-bottom:.8rem' },
+                   [show]));
+  }
+
+  batchOrder().forEach(({ batch, index }) => {
+    if (batch.hidden) return;
+    host.append(batchCard(batch, index));
+  });
 
   const graded = state.batches.filter((batch) => batch.summary);
   setStep('step-grade', graded.length > 0, 'hint-grade',
@@ -1485,24 +1633,56 @@ function renderBatches() {
   renderReview();
 }
 
+/* "Scan 1234.pdf and 1 more at 12:34 PM" - enough to tell one graded batch
+   from the next without opening anything. */
+function batchStamp(batch) {
+  const parts = [];
+  const names = batch.uploaded || [];
+  if (names.length) {
+    parts.push(names[0] + (names.length > 1
+      ? ' and ' + (names.length - 1) + ' more' : ''));
+  }
+  if (batch.at) {
+    const when = new Date(batch.at);
+    if (!isNaN(when)) {
+      parts.push('at ' + when.toLocaleTimeString([],
+        { hour: 'numeric', minute: '2-digit' }));
+    }
+  }
+  return parts.join(' ');
+}
+
 function batchCard(batch, index) {
   const card = el('div', { className: 'batch' });
   const message = el('div', { className: 'msg' });
   const results = el('div');
-  const header = (extra) => el('div', { className: 'batch-head' },
-    [el('h4', {}, ['Batch ' + batch.n])].concat(extra || []));
+  const header = (extra) => {
+    const title = el('div', { className: 'batch-title' },
+                     [el('h4', {}, ['Batch ' + batch.n])]);
+    const stamp = batchStamp(batch);
+    if (stamp) {
+      title.append(el('span', { className: 'stamp', textContent: stamp }));
+    }
+    return el('div', { className: 'batch-head' },
+              [title].concat(extra || []));
+  };
 
   // Once a batch is graded it is a record of a run that happened, with its own
   // key and thresholds. Re-running it with today's settings would quietly
   // disagree with the files already downloaded, so it is closed to editing.
   if (batch.summary) {
+    // Hiding keeps everything and only folds the card away; removing throws
+    // the results out. They are deliberately not the same button.
+    const hide = el('button', { textContent: 'Hide' });
+    hide.onclick = () => { batch.hidden = true; save(); renderBatches(); };
     const drop = el('button', { className: 'danger', textContent: 'Remove' });
     drop.onclick = () => {
       if (!confirm('Remove batch ' + batch.n + ' and its saved results? ' +
                    'Anything not downloaded is lost.')) return;
+      dropPdfs(batch.n);
       state.batches.splice(index, 1); save(); renderBatches();
     };
-    card.append(header(drop), results);
+    card.append(header(el('div', { className: 'row' }, [hide, drop])), results);
     results.append(summaryView(batch));
     return card;
   }
@@ -1539,6 +1719,8 @@ function batchCard(batch, index) {
       return;
     }
 
+    batch.uploaded = files.map((file) => file.name);
+    batch.at = Date.now();
     go.disabled = true; drop.disabled = true;
     bar.hidden = false; fill.style.width = '15%';
     message.className = 'msg info';
@@ -1575,14 +1757,19 @@ function batchCard(batch, index) {
       batch.files = body.files
         .filter((item) => item.encoding === 'utf-8')
         .map((item) => ({ name: item.name, type: item.type, data: item.data }));
-      // PDFs are too big to keep in localStorage, so they are handed to the
-      // browser once and dropped. Record their names, because that download
-      // is the only copy the operator will ever get.
+      // PDFs go to IndexedDB rather than localStorage, which could not hold
+      // them, so they can be downloaded again later - after a re-score, or
+      // after somebody loses the first copy.
       const pdfs = body.files.filter((item) => item.encoding === 'base64');
       batch.pdfs = pdfs.map((item) => item.name.split('/').pop());
+      batch.pdfsKept = true;
+      for (const item of pdfs) {
+        const name = item.name.split('/').pop();
+        const blob = fileFromServer(item);
+        if (!await keepPdf(batch.n, name, blob)) batch.pdfsKept = false;
+        download(name, blob);
+      }
       save();
-      pdfs.forEach((item) => download(item.name.split('/').pop(),
-                                      fileFromServer(item)));
       renderBatches();
     } catch (error) {
       message.className = 'msg bad';
@@ -1668,20 +1855,20 @@ function summaryView(batch) {
 
   if (batch.pdfs && batch.pdfs.length) {
     const many = batch.pdfs.length !== 1;
-    const names = [];
-    batch.pdfs.forEach((name, index) => {
-      if (index) names.push(', ');
-      names.push(el('code', { textContent: name }));
-    });
-    box.append(el('p', { className: 'note' }, [
+    box.append(el('p', { className: 'note', textContent:
       plural(batch.pdfs.length, 'A marked-up scan was', 'Marked-up scans were') +
-      ' sent to this browser\u2019s downloads folder (',
-      ...names,
-      '). ' + (many ? 'They are' : 'It is') +
-      ' too large to keep on this page, so that download is the only copy ' +
-      '\u2014 everything else listed above stays here and can be downloaded ' +
-      'again.',
-    ]));
+      ' sent to this browser\u2019s downloads folder. ' +
+      (batch.pdfsKept
+        ? (many ? 'Copies are' : 'A copy is') +
+          ' kept here too, so you can take ' +
+          (many ? 'them' : 'it') + ' again.'
+        : 'This browser would not store ' + (many ? 'copies' : 'a copy') +
+          ', so that download is the only one.') }));
+    if (batch.pdfsKept) {
+      box.append(fileList(batch.pdfs.map((name) => ({
+        name: name, pdf: true, batch: batch.n,
+      }))));
+    }
   }
   return box;
 }
@@ -1701,8 +1888,18 @@ function fileList(files) {
   const list = el('ul', { className: 'files' });
   byUsefulness(files).forEach((item) => {
     const get = el('button', { textContent: 'Download' });
-    get.onclick = () => download(item.name.split('/').pop(), item.data,
-                                 item.type);
+    get.onclick = async () => {
+      if (item.pdf) {
+        const blob = await readPdf(item.batch, item.name);
+        if (!blob) {
+          return say('msg-grade', 'bad',
+                     'This browser no longer has a copy of ' + item.name +
+                     '. Grade the batch again to produce a new one.');
+        }
+        return download(item.name, blob);
+      }
+      download(item.name.split('/').pop(), item.data, item.type);
+    };
     const name = el('span', { className: 'name', textContent: item.name });
     if (item.updated) {
       name.append(el('span', { className: 'tag', textContent: '(updated)' }));
@@ -2023,6 +2220,7 @@ function start() {
   $('annotate-ids').oninput = () => {
     state.annotateIds = $('annotate-ids').value;
     save();
+    renderAnnotateWho();
   };
   $('skip-blanks').onchange = () => {
     state.skipBlanks = $('skip-blanks').checked;
@@ -2042,6 +2240,7 @@ function start() {
     } catch (error) {
       console.warn('Could not clear saved work:', error);
     }
+    dropEveryPdf();
     location.reload();
   };
 

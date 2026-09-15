@@ -305,7 +305,11 @@ def _logo(c: pdfcanvas.Canvas):
 def _answer_block(c: pdfcanvas.Canvas, first_column: int, first_question: int):
     for index in range(layout.ROWS_PER_SUBCOLUMN):
         row = layout.MCQ_FIRST_ROW + index
-        number_x, number_y = layout.cell_to_inches(first_column - 0.15,
+        # Right-aligned a third of a cell in from the bubbles, which puts a
+        # two-digit number centred in its own cell. Hard against the bubbles
+        # it sat closer to option A than the options sit to each other, and
+        # the review mark - which rings the whole cell - missed it.
+        number_x, number_y = layout.cell_to_inches(first_column - 0.34,
                                                    row + 0.5)
         c.setFont(SERIF, 7)
         c.drawRightString(number_x * inch, (number_y - 0.035) * inch,

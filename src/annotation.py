@@ -130,11 +130,17 @@ def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
 
     # Answers. A test left out of the run was never read, so there is
     # nothing truthful to draw on it.
+    #
+    # Tracked rather than taken from the last loop variable: on a page whose
+    # tests were all left out of the run the loop never runs at all, and
+    # reading `key` afterwards raised UnboundLocalError.
+    scored = False
     for column_index, (_, questions) in enumerate(scan.tests):
         if only_tests is not None and \
                 tests_before + column_index + 1 not in only_tests:
             continue
         key = keys.get(tests_before + column_index + 1) if keys else None
+        scored = scored or key is not None
         accepted_for = key.answers if key is not None else None
         for index, group in enumerate(questions):
             chosen = group.selected(thresholds)
@@ -159,7 +165,7 @@ def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
             if group.unclear(thresholds) and group.marker is not None:
                 _ring(annotated, group.marker, UNCLEAR_COLOR)
 
-    _legend(annotated, heading, scored=key is not None)
+    _legend(annotated, heading, scored=scored)
     return annotated
 
 

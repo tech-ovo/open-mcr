@@ -1,4 +1,5 @@
 import typing
+import typing as tp
 
 import cv2
 import numpy as np
@@ -205,16 +206,23 @@ def _corner_from_l_mark(l_mark_origin: geometry_utils.Point,
         + v * (l_mark_origin.y - bottom_left.y))
 
 
-def _mark_candidates(image: np.ndarray
+def _mark_candidates(image: np.ndarray, max_span: float = MAX_MARK_SPAN
                      ) -> typing.List[typing.Tuple[geometry_utils.Point,
                                                    float]]:
     """Every small solid blob on the page, as (centroid, area).
 
     Shape is deliberately not tested here: this is the path taken when a mark
     has been scribbled over or shaded in, so it no longer has one.
+
+    ``max_span`` is how big a blob may be, as a fraction of the page's shorter
+    side. The default suits searching the whole page, where anything larger is
+    not a corner mark. Searching a known position can afford to be far more
+    generous, because a mark somebody has drawn across merges with the drawing
+    into one large blob - and there, position is doing the work that size and
+    shape do elsewhere.
     """
     page_height, page_width = image.shape[:2]
-    limit = MAX_MARK_SPAN * min(page_height, page_width)
+    limit = max_span * min(page_height, page_width)
     contours, _ = cv2.findContours(image_utils.detect_edges(image),
                                    cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     found = []
@@ -356,16 +364,23 @@ def _find_by_shape(image: np.ndarray,
                             centroid.y, target_y, y_tolerance):
                     buckets[index].append(
                         ((centroid.x - target_x) ** 2 +
-                         (centroid.y - target_y) ** 2, square))
+                         (centroid.y - target_y) ** 2, square,
+                         # How far out this candidate sits, along the
+                         # direction the corner lies in.
+                         abs(centroid.x) + abs(centroid.y)))
                     break
 
         if not all(buckets):
             continue
-        chosen = [min(bucket, key=lambda item: item[0]) for bucket in buckets]
-        score = sum(distance for distance, _ in chosen)
+        # Of the squares that could be a given corner, take the one furthest
+        # out. These are office-scanned pages: there is nothing outside the
+        # sheet's own marks, so the outermost candidate is the mark, while an
+        # inner one is a bubble or a letter that happens to be square.
+        chosen = [min(bucket, key=lambda item: (-item[2], item[0]))
+                  for bucket in buckets]
+        score = sum(item[0] for item in chosen)
         top_right, bottom_left, bottom_right = (
-            geometry_utils.guess_centroid(square.polygon)
-            for _, square in chosen)
+            geometry_utils.guess_centroid(item[1].polygon) for item in chosen)
 
         corners = [
             _corner_from_l_mark(l_mark.get_origin(), bottom_left,
@@ -378,6 +393,104 @@ def _find_by_shape(image: np.ndarray,
             best = (score, corners)
 
     return None if best is None else best[1]
+
+
+#: How far from where the batch says a corner should be a mark may sit and
+#: still be taken for it, as a fraction of the page's shorter side. Tight,
+#: because this is the whole of the check: about a cell and a half, which
+#: covers a page fed in slightly crooked and nothing else.
+PRIOR_SEARCH_RADIUS = 0.035
+
+#: Blobs up to this fraction of the page count when searching a known corner.
+#: A mark drawn over merges with the drawing, and the combined blob is far too
+#: big to pass the search-the-whole-page limit.
+PRIOR_MARK_SPAN = 0.14
+
+
+def corner_fractions(corners: geometry_utils.Polygon, image: np.ndarray
+                     ) -> tp.Tuple[tp.Tuple[float, float], ...]:
+    """Express found corners as fractions of the page, so they transfer."""
+    height, width = image.shape[:2]
+    return tuple((point.x / width, point.y / height) for point in corners)
+
+
+#: At least this many of the four corners must be found where the batch says
+#: they should be before the page is believed to be sitting like the others.
+#: Two is enough to fix a translation, a rotation and a scale between them.
+MINIMUM_CONFIRMED_CORNERS = 2
+
+
+def find_with_prior(image: np.ndarray,
+                    prior: tp.Sequence[tp.Tuple[float, float]],
+                    aspect: float,
+                    l_mark_offset: typing.Tuple[float, float] =
+                    DEFAULT_L_MARK_OFFSET
+                    ) -> typing.Optional[geometry_utils.Polygon]:
+    """Find the corners using where the rest of the batch put theirs.
+
+    Each expected corner is looked for within :data:`PRIOR_SEARCH_RADIUS`.
+    Whatever is found fixes how this page sits relative to the batch, and the
+    corners that could not be found are carried across by that same
+    transform - which is what recovers a mark someone has drawn a line
+    through, since it leaves no shape behind to find.
+
+    The result goes through the same grid check as every other route, so a
+    page that genuinely has no corner marks still fails rather than being
+    handed the batch's by default.
+    """
+    if not prior or len(prior) != 4:
+        return None
+    candidates = _mark_candidates(image, max_span=PRIOR_MARK_SPAN)
+    if not candidates:
+        return None
+    height, width = image.shape[:2]
+    limit = PRIOR_SEARCH_RADIUS * min(height, width)
+    corners_here = [(fraction_x * width, fraction_y * height)
+                    for fraction_x, fraction_y in prior]
+    # Three of the marks are centred on their corner, but the L-mark hangs
+    # inwards, so its blob is half an L-mark in from the corner the prior
+    # records. Look for the blobs where the blobs are; the corners follow
+    # from the transform, not from the blobs directly.
+    grid_width = corners_here[1][0] - corners_here[0][0]
+    grid_height = corners_here[3][1] - corners_here[0][1]
+    expected = list(corners_here)
+    expected[0] = (corners_here[0][0] + l_mark_offset[0] * grid_width,
+                   corners_here[0][1] + l_mark_offset[1] * grid_height)
+
+    confirmed_from = []
+    confirmed_to = []
+    for target_x, target_y in expected:
+        best = min(candidates,
+                   key=lambda item: (item[0].x - target_x) ** 2
+                   + (item[0].y - target_y) ** 2)
+        distance = ((best[0].x - target_x) ** 2
+                    + (best[0].y - target_y) ** 2) ** 0.5
+        if distance <= limit:
+            confirmed_from.append((target_x, target_y))
+            confirmed_to.append((best[0].x, best[0].y))
+
+    if len(confirmed_to) < MINIMUM_CONFIRMED_CORNERS:
+        return None
+
+    # Translation, rotation and uniform scale from where the batch sits to
+    # where this page does, fitted on the marks that were found and applied to
+    # the corners. Not a full affine: the page has moved, it has not been
+    # stretched, and pretending otherwise would let two noisy points shear the
+    # grid.
+    matrix, _ = cv2.estimateAffinePartial2D(
+        np.array(confirmed_from, dtype=np.float32).reshape(-1, 1, 2),
+        np.array(confirmed_to, dtype=np.float32).reshape(-1, 1, 2),
+        method=cv2.LMEDS)
+    if matrix is None:
+        return None
+    moved = cv2.transform(
+        np.array(corners_here, dtype=np.float32).reshape(-1, 1, 2), matrix)
+    found = [geometry_utils.Point(float(point[0][0]), float(point[0][1]))
+             for point in moved]
+
+    if len({(round(point.x), round(point.y)) for point in found}) != 4:
+        return None
+    return found if _grid_is_plausible(found, image, aspect) else None
 
 
 def find_corner_marks(image: np.ndarray,

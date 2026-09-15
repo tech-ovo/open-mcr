@@ -147,6 +147,10 @@
   .row + p, .row + .note, .row + ul, .row + h3 { margin-top: 1rem; }
   .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
            gap: 0 1rem; }
+  /* Exactly two across, so a cutoff always sits beside its review threshold
+     rather than wrapping to wherever there happens to be room. */
+  .pairs { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+  @media (max-width: 30rem) { .pairs { grid-template-columns: 1fr; } }
 
   /* A file input styled to match the buttons: the native control is hidden
      and the label does the talking. */
@@ -222,9 +226,14 @@
   .batch { border: 1px solid var(--line); border-radius: 8px;
            padding: .8rem .9rem; margin-bottom: .8rem; }
   .batch h4 { margin: 0; font: 600 .98rem var(--sans); }
-  /* The title and its Remove button share a line, with room between them. */
+  /* The title and its buttons share a line, with room between them. */
   .batch-head { display: flex; align-items: center; justify-content: space-between;
                 gap: 1rem; margin-bottom: .7rem; }
+  .batch-title { display: flex; align-items: baseline; gap: .6rem;
+                 flex-wrap: wrap; min-width: 0; }
+  /* Which scan this was, and when - enough to tell two graded batches apart. */
+  .batch-title .stamp { font-family: var(--mono); font-size: .8rem;
+                        color: var(--ink-faint); overflow-wrap: anywhere; }
   .bar { height: 6px; background: var(--line-soft); border-radius: 3px;
          overflow: hidden; margin: .55rem 0; }
   .bar > i { display: block; height: 100%; background: var(--accent); width: 0;
@@ -267,7 +276,8 @@
 
   /* Examples of what one answer cell may hold. */
   .cells { width: auto; margin-bottom: .85rem; }
-  .cells td { vertical-align: baseline; border: 0; padding: .18rem .5rem .18rem 0; }
+  .cells td, .cells th { vertical-align: baseline; border: 0; text-align: left;
+                         padding: .18rem .5rem .18rem 0; }
   .cells td:first-child { font-family: var(--mono); font-weight: 700;
                           white-space: nowrap; color: var(--accent); }
 
@@ -361,8 +371,8 @@
 
     <h3 id="h-levels">Latin levels</h3>
     <p class="note" id="level-note">
-      One bubble each, printed top to bottom in this order. A key refers to
-      them by these names, so renaming one here renames it everywhere.
+      Allowed or excluded tests use these names, so renaming one here renames
+      it everywhere.
     </p>
     <div class="grid2" id="levels"></div>
     <div class="row" id="level-buttons" hidden>
@@ -390,10 +400,9 @@
       <button id="invite-sheet">Copy a link with this design</button>
     </div>
     <p class="note">
-      That link is the step 1 invite plus everything on this page. Anyone
-      grading these sheets <strong>needs the same design</strong>, because the
-      reader works from it — so send this one rather than the plain invite once
-      you have changed anything here.
+      That link contains the invite from step 1 as well as everything in this
+      step. Send this link rather than the plain invite if you have customized
+      any wording.
     </p>
     <div class="msg" id="msg-sheet"></div>
 
@@ -401,7 +410,7 @@
     <ul class="note">
       <li>Print <strong>double-sided</strong> (your printer may call this
         <em>duplex</em>).</li>
-      <li>Use <strong>100% scale</strong> if possible. "Fit to page" is
+      <li>Use <strong>100% scale</strong> if possible. &lsquo;Fit to page&rsquo; is
         acceptable if your printer requires it, but it makes the bubbles
         smaller.</li>
       <li>Do <strong>not</strong> print two pages to a sheet.</li>
@@ -456,14 +465,12 @@
     <ul class="note">
       <li><strong>A. Type or paste directly</strong> (easiest).</li>
       <li><strong>B. Upload a spreadsheet.</strong></li>
-      <li><strong>C. Edit the grid</strong> &mdash; you can also review or
-        change answers here.</li>
     </ul>
 
     <h3>A. Type or paste the answers</h3>
     <p class="note">
-      One box per test. Separate the answers with spaces, commas or newlines,
-      or paste one unbroken string like <code>ABCDE…</code>.
+      Paste directly into each box, and it will try to parse whatever you
+      have.
     </p>
     <div id="answers"></div>
     <div class="row">
@@ -479,8 +486,7 @@
       <summary>B. Upload a spreadsheet</summary>
       <div class="body">
         <p class="note">
-          Download the template, type the answers into the numbered rows in
-          Excel or Google Sheets, then bring the file back.
+          Download the template, type the answers, then bring the file back.
         </p>
         <div class="row">
           <button class="primary" id="download-template">Download template</button>
@@ -491,11 +497,11 @@
     </details>
 
     <details class="method">
-      <summary>C. Review answers (optional)</summary>
+      <summary>Review answers (optional)</summary>
       <div class="body">
         <p class="note">
-          Every answer is editable here, however it got in. A cell you have
-          typed into is shown in <strong>bold</strong>.
+          Every answer is editable here. Edited cells are shown in
+          <strong>bold</strong>.
         </p>
         <div class="answer-grid" id="answer-grid"></div>
       </div>
@@ -506,8 +512,7 @@
       <tr><td>C</td>
         <td>The answer is C.</td></tr>
       <tr><td>ABD</td>
-        <td>The answer is A, B and D. The student must fill
-          all three.</td></tr>
+        <td>The answer is A, B and D. The student must bubble all three.</td></tr>
       <tr><td>A|BD</td>
         <td>Either is accepted: A on its own, or B and D together.</td></tr>
       <tr><td>X</td>
@@ -536,16 +541,15 @@
           <li><strong>A repeated letter is an error.</strong> <code>AA</code> is
             rejected, as is a stray <code>|</code> such as <code>A|</code>, and
             any letter outside A&ndash;E.</li>
-          <li><strong>A and B can be mixed.</strong> They write to the same
-            answers, and the grid shows whatever is there.</li>
+          <li><strong>Options A and B can be mixed.</strong> They write to the
+          same answers, and the grid shows whatever is there.</li>
           <li><strong>Uploading merges, instead of replacing.</strong> A column
             whose Test ID matches a test you already have updates that test;
             anything else is added. Tests not mentioned in the file are left
             alone, and <strong>Undo upload</strong> puts everything back.</li>
-          <li><strong>The file is <code>Keys.csv</code>.</strong> The field
-            names run down the first column (Name, Test ID, Excluded, then 1 to
-            <span class="q-count">80</span>) with one further column per
-            test.</li>
+          <li><strong>The file is <code>Keys.csv</code>.</strong> The first
+          column has headers Name, Test ID, Excluded, then 1 to <span
+          class="q-count">80</span>, with one further column per test.</li>
           <li><strong><code>Excluded</code> may be written as
             <code>Allowed</code> instead</strong>, naming the levels that
             <em>may</em> sit each test rather than the ones that may not. Use
@@ -574,26 +578,25 @@
     <span class="hint" id="hint-thresholds">Defaults</span></summary>
   <div class="body">
     <p class="note">
-      Nothing here needs changing for an ordinary run. It is all remembered,
-      and applies to every batch you grade from now on.
+      You don&rsquo;t need to change this for most runs.
     </p>
 
     <h3>Which tests to grade</h3>
     <p class="note">
-      Every test on the sheet, unless you say otherwise. Untick one and its
-      columns are not read at all: no results, no answer key needed, and
-      nothing on the review sheets. Useful when a test is scored elsewhere, or
-      when its key is not ready yet.
+      Every test on the sheet is graded by default. An unticked test is not
+      read at all: no results, no answer key needed, and nothing on the review
+      sheets. Useful when a test is scored elsewhere, or when its key is not
+      ready yet.
     </p>
     <div class="chips" id="which-tests"></div>
 
     <h3>Which sides were scanned</h3>
     <p class="note">
-      Both, unless you say otherwise. Scanning one side only is for when a
-      test is being re-marked on its own: the pages are then read one at a
-      time instead of in front-and-back pairs, and a page of the other side is
-      set aside rather than read. The front carries Test 1 and the back
-      carries Tests 2 and 3, so a side you leave out takes its tests with it.
+      Scanning one side only is for when a test is being re-marked on its own:
+      the pages are then read one at a time instead of in front-and-back
+      pairs, and a page of the other side is set aside rather than read. The
+      front carries Test 1 and the back carries Tests 2 and 3, so a side you
+      leave out takes its tests with it.
     </p>
     <div class="chips" id="which-sides"></div>
     <p class="note" id="sides-note" hidden></p>
@@ -602,11 +605,9 @@
         Skip blank pages</label>
       <p class="note">
         A duplex scanner produces an empty page for the back of a one-sided
-        original, giving printed, blank, printed, blank. With this on those
-        empty pages are passed over; with it off each one is reported as
-        something that should not be there. Either way, a blank page turning
-        up where a printed one should be is flagged, so a sheet that missed
-        the feeder is not mistaken for one that was meant to be empty.
+        original, giving printed, blank, printed, blank. With this setting on,
+        those empty pages are skipped. With it off, each one is reported as
+        something that should not be there.
       </p>
     </div>
 
@@ -618,32 +619,32 @@
       unless you are demoing or debugging.
     </p>
     <div id="annotate-who" hidden>
-      <label><span class="lab">Which papers</span>
-        <span class="sub">Marking up a whole convention makes a document
-          nobody reads</span>
+      <label>
         <select id="annotate-students">
-          <option value="">Every paper</option>
-          <option value="unknown">Only where the Student ID could not be read</option>
-          <option value="list">Only these Student IDs…</option>
+          <option value="">Mark up every paper</option>
+          <option value="unknown">Mark up only where the Student ID could not be read</option>
+          <option value="list">Mark up only certain Student IDs</option>
         </select></label>
       <label id="annotate-list" hidden><span class="lab">Student IDs</span>
         <span class="sub">Separated by commas</span>
-        <input type="text" id="annotate-ids" placeholder="04275, 04276"
-               autocomplete="off" spellcheck="false"></label>
+        <input type="text" id="annotate-ids" placeholder="06767, 06768"
+               autocomplete="off" spellcheck="false"
+               inputmode="numeric"></label>
+      <div class="msg" id="msg-annotate-ids"></div>
     </div>
 
     <h3>Thresholds</h3>
     <p class="note">
       Every bubble is measured for darkness on a scale from 0 (blank paper) to
       1 (solid black). A bubble darker than the <strong>cutoff</strong> counts
-      as filled. One that lands between the <strong>review threshold</strong>
-      and the cutoff is too close to call, so it is counted neither way and
-      goes to step 7 for a person to decide. Anything fainter is ignored.
+      as filled. One that lands between the <strong>review threshold</strong> and the
+      cutoff goes to step 7 for a person to decide. Anything fainter is
+      ignored.
     </p>
     <p class="note">
-      Where those two lines fall depends on the scanner, the paper and how
-      hard the students pressed, so the server measures them from each batch of
-      scans rather than using fixed numbers.
+      Where those two cutoffs fall depends on the scanner, the paper, and how
+      hard the students pressed. So the server measures them from each batch
+      of scans rather than using fixed numbers.
     </p>
     <label class="inline">
       <input type="checkbox" id="thr-override"> Override thresholds (not recommended)
@@ -654,7 +655,7 @@
         box empty to compute that one automatically — you can pin one number
         and let the other three be measured.
       </p>
-      <div class="grid2">
+      <div class="pairs">
         <label><span class="lab">Answer cutoff</span>
           <input type="number" id="thr-as" step="0.01" min="0" max="1" placeholder="automatic"></label>
         <label><span class="lab">Answer review threshold</span>
@@ -735,29 +736,26 @@
     <span class="hint" id="hint-review">Nothing to review</span></summary>
   <div class="body">
     <p class="note">
-      Two kinds of thing reach this step. <strong>Unclear</strong> is a bubble
-      too faint to call — the reader neither counts it nor ignores it, and asks
-      instead. <strong>Missing</strong> is a required field it could not read at
-      all. A question left blank is not an error: that is the student's choice.
+      An <strong>unclear</strong> bubble is too faint to be definitively
+      filled. A <strong>missing</strong> bubble is a required field it could
+      not read at all. A question left blank is not an error: that is the
+      student&rsquo;s choice.
     </p>
     <p class="note">
       Each file asks for one correction per row. Open it, check the paper, fill
       in the answer, mark the row <strong>Done</strong>, and upload it below.
-      The <code>Done</code> column has to read <code>TRUE</code>, which is what
-      a ticked checkbox saves as; in a plain editor, type <code>TRUE</code>
-      yourself. A row you have not ticked is left exactly as it was and comes
-      back as a shorter file to finish next time, so you can do half now and
-      half later.
+      The <code>Done</code> column should read <code>TRUE</code>. A row you
+      have not ticked is left exactly as it was and comes back as a shorter
+      file to finish next time, so you can do half now and half later.
     </p>
 
     <details class="tech">
       <summary>Correcting something that was never flagged</summary>
       <div class="body">
         <p class="note">
-          You can <strong>add</strong> rows as well as fill them in. A student
-          whose answer was read confidently but wrongly &mdash; a stray mark
-          read as an answer, say &mdash; never reaches these files, and a row
-          you write by hand is how to fix it.
+          You can <strong>add</strong> rows too. A student whose answer was
+          read confidently wrong never reaches these files, and a row you
+          write by hand is how to fix it.
         </p>
         <p class="note">
           A row needs enough of <code>File</code>, <code>Page</code>,
@@ -770,13 +768,13 @@
             <tr><th>Student ID</th><th>Test ID</th><th>Question</th>
               <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th>
               <th>Done</th></tr>
-            <tr><td>04275</td><td>1002</td><td>17</td>
+            <tr><td>06767</td><td>1067</td><td>17</td>
               <td>FALSE</td><td>TRUE</td><td>FALSE</td><td>FALSE</td>
               <td>FALSE</td><td>TRUE</td></tr>
           </table>
         </div>
         <p class="note">
-          That says: on student 04275&rsquo;s test 1002, question 17 is B.
+          That says: on student 06767&rsquo;s test 1067, question 17 is B.
           Leave every option <code>FALSE</code> to record that the student
           answered nothing. If a row names no test, or names more than one, it
           is reported back rather than guessed at.
@@ -790,8 +788,8 @@
 
     <h3>Google Sheets is optional</h3>
     <p class="note">
-      <strong>Any editor that saves CSV will do</strong> — Excel, Numbers, even
-      a text editor. Nothing here needs Google Sheets.
+      <strong>Any editor that saves CSV will do</strong>, even a text editor.
+      Nothing here needs Google Sheets.
     </p>
     <p class="note">
       <strong>Sheets is worth setting up when several people are correcting at
@@ -818,7 +816,8 @@
         </ul>
       </li>
       <li>For each file: <strong>File → Import → Insert new sheet(s)</strong>.
-        It has to create a <em>new sheet</em> — "Replace current sheet" will not
+        It has to create a <em>new sheet</em> — &lsquo;Replace current
+        sheet&rsquo; will not
         trigger the script.</li>
       <li>When the sheet is finished, <strong>File → Download →
         Comma-separated values</strong>.</li>

@@ -31,6 +31,43 @@ ANNOTATED_DIRNAME = "Annotated"
 #: and one back page, so both layouts are represented.
 CALIBRATION_PAGES = 2
 
+#: How many pages must have found their own corner marks before the batch is
+#: allowed to tell a page that could not where to look. One good page is not a
+#: consensus.
+MINIMUM_PRIOR_PAGES = 3
+
+#: How far a page's grid may sit from where the rest of the batch put theirs,
+#: as a fraction of the page, before it is worth mentioning. Pages off the
+#: same scanner agree to a fraction of a percent, so this is a long way out -
+#: far enough that it is nearly always a real misalignment rather than an
+#: ordinary crooked feed.
+CORNER_DEVIATION_NOTE = 0.03
+
+
+def _corner_deviation(corners, median) -> float:
+    """The largest distance between a page's corners and the batch's."""
+    return max(
+        ((point[0] - other[0]) ** 2 + (point[1] - other[1]) ** 2) ** 0.5
+        for point, other in zip(corners, median))
+
+
+def _median_corners(found: tp.Sequence[tp.Sequence[tp.Tuple[float, float]]]
+                    ) -> tp.List[tp.Tuple[float, float]]:
+    """Where this batch puts its four corner marks, as page fractions.
+
+    The median rather than the mean: one page read against a wrong grid should
+    not drag the answer, and with a couple of hundred pages there is no
+    shortage of samples.
+    """
+    import statistics
+
+    return [
+        (statistics.median(page[index][0] for page in found),
+         statistics.median(page[index][1] for page in found))
+        for index in range(4)
+    ]
+
+
 NEWLINE = chr(10)
 
 STATUS_OK = ""
@@ -558,11 +595,18 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
                wanted: tp.Optional[tp.Tuple[int, ...]] = None
                ) -> tp.Tuple[tp.List[TestRow],
                              tp.List[review_module.UnclearRow],
-                             tp.List[str], str, str]:
-    """Turn one measured page into result rows plus anything needing review."""
+                             tp.List[str], str, str,
+                             tp.List[tp.Tuple[int, int, int, float]]]:
+    """Turn one measured page into result rows plus anything needing review.
+
+    The last item lists any test that had to be read against its own cutoff
+    rather than the batch's, as (test number, doubtful before, doubtful
+    after, cutoff), so the calibration report can say it happened.
+    """
     rows: tp.List[TestRow] = []
     unclear: tp.List[review_module.UnclearRow] = []
     missing: tp.List[str] = []
+    rescues: tp.List[tp.Tuple[int, int, int, float]] = []
     page_number = page.page_index + 1
     name = page.path.name
 
@@ -573,7 +617,8 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
         or front_level
 
     def note_unclear(group: reading.BubbleGroup, test_id: str,
-                     test_number: int = 0):
+                     test_number: int = 0,
+                     cutoffs: tp.Optional[th.Thresholds] = None):
         unclear.append(
             review_module.UnclearRow(batch=batch,
                                      source_file=name,
@@ -583,7 +628,8 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
                                      location=group.location,
                                      test_number=test_number,
                                      guess=frozenset(
-                                         group.selected(thresholds))))
+                                         group.selected(cutoffs
+                                                        or thresholds))))
 
     def note_missing(field: str):
         if field not in missing:
@@ -616,14 +662,32 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
             elif len(group.selected(thresholds)) != 1:
                 note_missing(f"Test {test_number} ID")
 
+        # A student who pressed lightly throughout leaves every one of their
+        # marks under a cutoff drawn from a batch of people who did not. When
+        # nearly the whole test is borderline, ask this test's own bubbles
+        # where the line is; if they answer clearly, believe them.
+        cutoffs = thresholds
+        doubtful = th.unclear_count(questions, thresholds)
+        if (len(questions) >= th.RESCUE_MINIMUM_QUESTIONS
+                and doubtful >= th.RESCUE_UNCLEAR_FRACTION * len(questions)):
+            rescued = th.rescue(
+                [fill for group in questions for fill in group.fills],
+                thresholds)
+            if rescued is not None and th.unclear_count(questions, rescued) \
+                    <= th.RESCUE_IMPROVEMENT * doubtful:
+                cutoffs = rescued
+                rescues.append((test_number, doubtful,
+                                th.unclear_count(questions, rescued),
+                                rescued.answer_select))
+
         marked: tp.List[tp.Set[str]] = []
         needs_review = False
         for group in questions:
-            marked.append(group.selected(thresholds))
+            marked.append(group.selected(cutoffs))
             # A question left blank is the student's choice, not an error.
-            if group.unclear(thresholds):
+            if group.unclear(cutoffs):
                 needs_review = True
-                note_unclear(group, test_id, test_number)
+                note_unclear(group, test_id, test_number, cutoffs)
         rows.append(
             TestRow(batch=batch,
                     source_file=name,
@@ -635,7 +699,7 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
                     marked=marked,
                     needs_review=needs_review))
 
-    return rows, unclear, missing, own_id, latin_level
+    return rows, unclear, missing, own_id, latin_level, rescues
 
 
 def run(options: RunOptions,
@@ -668,6 +732,7 @@ def run(options: RunOptions,
         except keys_module.AnswerKeyError as error:
             raise BreakingError(str(error))
 
+    notes: tp.List[str] = []
     scans = resolve_batch_folder(options.input_folder, options.batch)
     if not scans.is_dir():
         raise BreakingError(f"There is no folder '{scans}' to read scans from.")
@@ -705,6 +770,7 @@ def run(options: RunOptions,
     # page-code mark, so nothing here depends on the pages having been fed in
     # the right order.
     scans_by_page: tp.Dict[tp.Tuple[pathlib.Path, int], reading.PageScan] = {}
+    found_corners: tp.List[tp.Tuple[tp.Tuple[float, float], ...]] = []
     with console.progress("Reading pages.", len(reports)) as bar:
         for path, page_index, image in batching.iter_pages(image_paths):
             report = by_page.get((path, page_index))
@@ -726,12 +792,73 @@ def run(options: RunOptions,
                 continue
             scans_by_page[(path, page_index)] = scan
             report.side = scan.page_side
+            if scan.corners:
+                found_corners.append(scan.corners)
             bar.step()
+
+    # --- a second chance, using where the batch put its corners ---
+    #
+    # A page fed in crooked, or with a mark drawn over, can defeat shape
+    # matching on its own while every other sheet in the batch found its
+    # corners without trouble. Those sheets say where to look.
+    stuck = [report for report in reports
+             if not report.readable and not report.blank]
+    if stuck and len(found_corners) >= MINIMUM_PRIOR_PAGES:
+        prior = _median_corners(found_corners)
+        rescued = 0
+        wanted = {(report.path, report.page_index): report
+                  for report in stuck}
+        for path, page_index, image in batching.iter_pages(
+                sorted({report.path for report in stuck})):
+            report = wanted.get((path, page_index))
+            if report is None:
+                continue
+            try:
+                scan = reading.scan_page_with_corners(
+                    image, variant, prior, latin_levels=text.latin_levels)
+            except corner_finding.CornerFindingError:
+                continue
+            scans_by_page[(path, page_index)] = scan
+            report.readable = True
+            report.note = ""
+            report.side = scan.page_side
+            rescued += 1
+        if rescued:
+            console.line(
+                f"{console_module.plural(rescued, 'page')} could not find "
+                "their own corner marks and were read using where the rest "
+                "of the batch put theirs.")
+            notes.append(
+                f"{console_module.plural(rescued, 'page')} were read using "
+                "corner positions taken from the rest of the batch.")
+
+    # --- does every page's grid sit where the others' do? ---
+    if len(found_corners) >= MINIMUM_PRIOR_PAGES:
+        median = _median_corners(found_corners)
+        astray = 0
+        for report in reports:
+            scan = scans_by_page.get((report.path, report.page_index))
+            if scan is None or not scan.corners:
+                continue
+            drift = _corner_deviation(scan.corners, median)
+            if drift <= CORNER_DEVIATION_NOTE:
+                continue
+            astray += 1
+            report.note = (
+                f"The grid on this page sits {drift * 100:.1f}% of the page "
+                "away from where the rest of the batch found theirs. It was "
+                "read, but check it against the marked-up scan before "
+                "trusting the answers."
+            ) + ((" " + report.note) if report.note else "")
+        if astray:
+            console.line(
+                console_module.plural(astray, "page")
+                + " read against a grid well away from the rest of the "
+                f"batch. See '{PAGES_FILENAME}'.")
 
     # --- a cutoff per input file ---
     per_file: tp.List[tp.Tuple[str, th.Thresholds]] = []
     thresholds_by_file: tp.Dict[pathlib.Path, th.Thresholds] = {}
-    notes: tp.List[str] = []
     for path in image_paths:
         if pinned is not None and pinned.is_complete:
             thresholds_by_file[path] = pinned.apply_to(
@@ -803,9 +930,17 @@ def run(options: RunOptions,
             tests_before = sum(
                 len(variant.variant_for_page(index).question_columns)
                 for index in range(page.position_in_sheet))
-            page_rows, page_unclear, page_missing, _, level = _interpret(
+            (page_rows, page_unclear, page_missing, _, level,
+             page_rescues) = _interpret(
                 scan, page, batch_label, thresholds, front_id, front_level,
                 tests_before, options.tests)
+            for number, before, after, cutoff in page_rescues:
+                notes.append(
+                    f"{page.path.name} page {page.page_index + 1}, test "
+                    f"{number}: {before} of {len(scan.tests[0][1])} questions "
+                    "were too faint to call against the batch cutoff, so this "
+                    f"test was read against its own ({cutoff:.4f}), leaving "
+                    f"{after}.")
             if page.position_in_sheet == 0:
                 front_level = level
             rows.extend(page_rows)

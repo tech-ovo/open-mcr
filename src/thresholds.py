@@ -31,12 +31,17 @@ import pathlib
 import typing as tp
 
 #: Where the review threshold sits, as a fraction of the way from a typical
-#: blank bubble to a typical filled one. 0.20 means anything at least a fifth
-#: of the way towards being a real mark, but not dark enough to be selected,
-#: is sent for a human to settle. Measured from the *class means* rather than
-#: from the cutoff, so a single half-erased bubble cannot move the band away
-#: from itself.
-DEFAULT_REVIEW_FRACTION = 0.20
+#: blank bubble to a typical filled one. 0.12 means anything at least an
+#: eighth of the way towards being a real mark, but not dark enough to be
+#: selected, is sent for a human to settle. Measured from the *class means*
+#: rather than from the cutoff, so a single half-erased bubble cannot move the
+#: band away from itself.
+#:
+#: Deliberately low. A faint mark that falls under it is not reported at all -
+#: the student's answer is silently dropped - which is a far worse failure
+#: than one more row on a review sheet. The per-test rescue below is what
+#: stops that generosity turning into an unmanageable pile of them.
+DEFAULT_REVIEW_FRACTION = 0.12
 
 #: When a spec gives only the cutoffs, the review threshold is put here,
 #: as a fraction of the cutoff.
@@ -329,6 +334,50 @@ def calibrate(answer_fills: tp.Sequence[float],
                                                default.metadata_select)
     return Thresholds(answer_select, answer_review, metadata_select,
                       metadata_review), notes
+
+
+# --- rescuing a faintly-marked test ---------------------------------------
+
+#: A test is re-read on its own terms once this fraction of its questions are
+#: too close to call. Below it the batch cutoff is doing its job and a second
+#: opinion would only add noise.
+RESCUE_UNCLEAR_FRACTION = 0.35
+
+#: ...and never for a handful of questions, where "most of them" means very
+#: little and one odd sheet could trigger it.
+RESCUE_MINIMUM_QUESTIONS = 10
+
+#: The rescue has to leave materially fewer questions in doubt than the batch
+#: cutoff did, or it is not an improvement and is not worth the divergence.
+RESCUE_IMPROVEMENT = 0.5
+
+
+def unclear_count(groups, thresholds: Thresholds) -> int:
+    """How many of these bubble groups are too close to call."""
+    return sum(1 for group in groups if group.unclear(thresholds))
+
+
+def rescue(fills: tp.Sequence[float], thresholds: Thresholds,
+           review_fraction: float = DEFAULT_REVIEW_FRACTION
+           ) -> tp.Optional[Thresholds]:
+    """A cutoff drawn from one test's own bubbles, if they split cleanly.
+
+    Returns None when there is no convincing split - which is the common case,
+    and the point: a test is only read on its own terms when its own marks say
+    where the line is, never merely because the batch cutoff was inconvenient.
+    """
+    split = find_split(fills)
+    if split is None:
+        return None
+    # A cutoff above the batch's own would make the reader stricter, which is
+    # not what this is for and risks dropping marks that were being read
+    # perfectly well.
+    if split.cutoff >= thresholds.answer_select:
+        return None
+    review = split.blank_mean + (split.separation * review_fraction)
+    return thresholds._replace(
+        answer_select=split.cutoff,
+        answer_review=min(review, split.cutoff * 0.99))
 
 
 # --- the calibration report ----------------------------------------------
