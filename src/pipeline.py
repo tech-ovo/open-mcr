@@ -16,6 +16,7 @@ from . import batching
 from . import console as console_module
 from . import corner_finding
 from . import grid_info as grid_i
+from . import image_utils
 from . import reading
 from . import review as review_module
 from . import sheet_layout as layout
@@ -23,6 +24,7 @@ from . import thresholds as th
 
 RESULTS_FILENAME = "Results.csv"
 STATS_FILENAME = "Question Stats.csv"
+PAGES_FILENAME = "Pages.csv"
 ANNOTATED_DIRNAME = "Annotated"
 
 #: How many pages of each file are read to calibrate its cutoffs. One front
@@ -116,9 +118,12 @@ def score_rows(rows: tp.Sequence[TestRow],
 
 
 def results_header(questions: int) -> tp.List[str]:
+    # "Test" numbers the tests across the whole sheet, from 1. Without it a
+    # row on the back page cannot be told from the one beside it, since both
+    # number their questions from 1.
     return ([
-        "Batch", "File", "Page", "Student ID", "Latin Level", "Test ID",
-        "Test Name", "Status", "Points", "Out Of", "Score (%)"
+        "Batch", "File", "Page", "Test", "Student ID", "Latin Level",
+        "Test ID", "Test Name", "Status", "Points", "Out Of", "Score (%)"
     ] + [str(number) for number in range(1, questions + 1)])
 
 
@@ -131,8 +136,9 @@ def write_results(path: pathlib.Path, rows: tp.Sequence[TestRow],
         for row in rows:
             score = row.score
             writer.writerow([
-                row.batch, row.source_file, row.page, row.student_id,
-                row.latin_level, row.test_id, row.test_name, row.status,
+                row.batch, row.source_file, row.page, row.test_number,
+                row.student_id, row.latin_level, row.test_id, row.test_name,
+                row.status,
                 "" if row.points is None else row.points,
                 "" if row.out_of is None else row.out_of,
                 "" if score is None else f"{score:.2f}",
@@ -176,6 +182,7 @@ def read_results(path: pathlib.Path,
             TestRow(batch=cell(line, "Batch"),
                     source_file=cell(line, "File"),
                     page=int(float(page_text)) if page_text else 0,
+                    test_number=int(float(cell(line, "Test") or 0)),
                     student_id=cell(line, "Student ID"),
                     latin_level=cell(line, "Latin Level"),
                     test_id=cell(line, "Test ID"),
@@ -245,48 +252,191 @@ def write_question_stats(path: pathlib.Path, rows: tp.Sequence[TestRow],
     return path
 
 
+def write_page_report(path: pathlib.Path,
+                      reports: tp.Sequence[batching.PageReport],
+                      batch: str) -> pathlib.Path:
+    """One row per scanned page: what it was, and what became of it.
+
+    Written on every run, including the ones where nothing went wrong, so that
+    "did every paper I put in come out again?" has an answer that does not
+    depend on anybody having noticed a warning.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["Batch", "File", "Page", "Side", "Student ID",
+                         "Test IDs", "Sheet", "Paired With", "Status",
+                         "Note"])
+        for report in reports:
+            partner = reports[report.partner] if report.partner is not None \
+                else None
+            writer.writerow([
+                batch,
+                report.path.name,
+                report.page_index + 1,
+                report.side_name,
+                report.student_id,
+                " ".join(report.test_ids),
+                "" if report.sheet_index is None else report.sheet_index + 1,
+                "" if partner is None else f"page {partner.page_index + 1}",
+                report.status,
+                report.note,
+            ])
+    return path
+
+
 # --- applying human corrections ------------------------------------------
 
 
+def _same_id(given: str, actual: str) -> bool:
+    """Do two readings of an identifier agree?
+
+    Lenient in the two ways that matter. A spreadsheet strips the leading zero
+    from ``04275``, so the shorter one is padded before comparing; and ``?``
+    stands for a digit the reader could not call, so it matches anything.
+    """
+    given = given.strip()
+    if not given:
+        return True
+    if len(given) < len(actual):
+        given = given.zfill(len(actual))
+    elif len(actual) < len(given):
+        actual = actual.zfill(len(given))
+    return batching.ids_compatible(given, actual)
+
+
+def _matches(row: TestRow, where: review_module.Address) -> bool:
+    """Could this correction be about this test?"""
+    if where.source_file and where.source_file != row.source_file:
+        return False
+    if where.page is not None and where.page != row.page:
+        return False
+    if where.test_number is not None and where.test_number != row.test_number:
+        return False
+    if not _same_id(where.test_id, row.test_id):
+        return False
+    return _same_id(where.student_id, row.student_id)
+
+
+def _field_test_number(field: str) -> tp.Optional[int]:
+    """The test a "Test 2 ID" row is about, or None for a whole-sheet field."""
+    parts = field.split()
+    if len(parts) == 3 and parts[0].lower() == "test" \
+            and parts[2].lower() == "id" and parts[1].isdigit():
+        return int(parts[1])
+    return None
+
+
+class AppliedOverrides(tp.NamedTuple):
+    changed: int
+    """How many readings a person actually overturned. A correction agreeing
+    with what the reader already had is not counted."""
+
+    settled: tp.Set[tp.Tuple[str, int, int, str]]
+    """The (file, page, test, question) of every answer row that was applied,
+    so the ones still outstanding can be worked out."""
+
+    settled_values: tp.Set[tp.Tuple[str, str]]
+    """The (file, field) of every missing-field row that was filled in."""
+
+    problems: tp.List[str]
+    """Corrections that could not be matched to exactly one test, in the words
+    they should be shown in."""
+
+    origins: tp.Set[str]
+    """Which review-sheet lines were actually used. Everything else in the
+    uploaded sheets is still outstanding, which is what makes a second round
+    of corrections possible."""
+
+
 def apply_overrides(rows: tp.Sequence[TestRow],
-                    overrides: review_module.Overrides) -> int:
+                    overrides: review_module.Overrides) -> AppliedOverrides:
     """Fold corrected review sheets into the rows.
 
-    Returns the number of values that actually *changed*. A correction that
-    agrees with what the reader already had is not counted, so the number
-    reported is the number of readings a person overturned.
+    Each correction is matched to the rows it could be about by whichever
+    identifying columns it filled in. An answer has to name exactly one test,
+    since it changes one question; a whole-field correction such as a Student
+    ID applies to every test on that sheet. Anything matching nothing, or
+    matching several tests when it should match one, is reported rather than
+    guessed at or dropped.
     """
     changed = 0
-    for row in rows:
-        for question_index in range(len(row.marked)):
-            corrected = overrides.answer_for(row.source_file, row.page,
-                                             str(question_index + 1))
-            if corrected is None:
-                continue
-            if set(corrected) != row.marked[question_index]:
-                row.marked[question_index] = set(corrected)
-                changed += 1
+    settled: tp.Set[tp.Tuple[str, int, int, str]] = set()
+    settled_values: tp.Set[tp.Tuple[str, str]] = set()
+    problems: tp.List[str] = []
+    origins: tp.Set[str] = set()
+    touched: tp.Set[int] = set()
 
-        student = overrides.value_for(row.source_file, row.page, "Student ID")
-        if student and student.strip() != row.student_id:
-            row.student_id = student.strip()
+    for correction in overrides.answers:
+        number = correction.question.strip()
+        if not number.isdigit():
+            continue        # a metadata row; the Missing sheet handles those
+        index = int(number) - 1
+        candidates = [row for row in rows if _matches(row, correction.where)
+                      and index < len(row.marked)]
+        if not candidates:
+            problems.append(
+                f"{correction.origin}: no test matches "
+                f"{correction.where.describe()}, so question {number} was not "
+                "changed.")
+            continue
+        if len(candidates) > 1:
+            problems.append(
+                f"{correction.origin}: {correction.where.describe()} matches "
+                f"{len(candidates)} tests, so it is not clear which "
+                f"question {number} is meant. Add a Test or Test ID column.")
+            continue
+        row = candidates[0]
+        if set(correction.chosen) != row.marked[index]:
+            row.marked[index] = set(correction.chosen)
             changed += 1
-        level = overrides.value_for(row.source_file, row.page, "Latin level")
-        if level and level.strip() != row.latin_level:
-            row.latin_level = level.strip()
-            changed += 1
-        # A Test ID row names its test, so only the matching row is updated.
-        for field, value in overrides.values.items():
-            if field[0] != row.source_file or field[1] != row.page:
+        settled.add((row.source_file, row.page, row.test_number, number))
+        origins.add(correction.origin)
+        touched.add(id(row))
+
+    for correction in overrides.values:
+        wanted_test = _field_test_number(correction.field)
+        candidates = [
+            row for row in rows
+            if _matches(row, correction.where)
+            and (wanted_test is None or row.test_number == wanted_test)
+        ]
+        if not candidates:
+            problems.append(
+                f"{correction.origin}: no test matches "
+                f"{correction.where.describe()}, so '{correction.field}' was "
+                "not changed.")
+            continue
+        value = correction.value.strip()
+        for row in candidates:
+            if not value:
                 continue
-            if not field[2].startswith("Test ") or not field[2].endswith(
-                    " ID"):
-                continue
-            if value.strip() and value.strip() != row.test_id:
-                row.test_id = value.strip()
-                changed += 1
-        row.needs_review = False
-    return changed
+            if correction.field.lower().startswith("student"):
+                if value != row.student_id:
+                    row.student_id = value
+                    changed += 1
+            elif correction.field.lower().startswith("latin"):
+                if value != row.latin_level:
+                    row.latin_level = value
+                    changed += 1
+            elif wanted_test is not None:
+                if value != row.test_id:
+                    row.test_id = value
+                    changed += 1
+            touched.add(id(row))
+        settled_values.add((candidates[0].source_file, correction.field))
+        origins.add(correction.origin)
+
+    # Only the rows a person actually settled stop needing review. Clearing
+    # the flag on every row, as this used to, made a second round of
+    # corrections impossible: nothing was left marked as still doubtful.
+    for row in rows:
+        if id(row) in touched:
+            row.needs_review = False
+
+    return AppliedOverrides(changed=changed, settled=settled,
+                            settled_values=settled_values, problems=problems,
+                            origins=origins)
 
 
 # --- the run -------------------------------------------------------------
@@ -300,6 +450,11 @@ class RunOptions(tp.NamedTuple):
     override_files: tp.Sequence[pathlib.Path] = ()
     threshold_spec: tp.Optional[str] = None
     annotate: bool = False
+    annotate_students: tp.Optional[tp.Union[str, tp.Tuple[str, ...]]] = None
+    """Which papers get a marked-up copy: None for all of them,
+    ``annotation.UNKNOWN_IDS`` for the ones whose Student ID could not be read
+    in full, or the Student IDs to include."""
+
     debug: bool = False
     sheet_text: tp.Optional[layout.SheetText] = None
     """The wording printed on the sheets being read. Only the Latin level
@@ -313,19 +468,37 @@ class RunOptions(tp.NamedTuple):
     simply not read, which is what makes it useful when one test of the three
     is scored somewhere else or not at all."""
 
+    sides: tp.Tuple[int, ...] = (0, 1)
+    """Which sides of the paper this scan contains: both, fronts only, or
+    backs only. A one-sided scan is graded a page at a time rather than in
+    pairs, and a page of the other side is set aside rather than read."""
 
-def _sample_page_indexes(sheets: tp.Sequence[batching.Sheet],
+    skip_blanks: bool = False
+    """Ignore pages with nothing on them, which is what a duplex scanner
+    hands back for the empty reverse of a one-sided original. Only sensible
+    on a one-sided scan; blanks are reported either way."""
+
+    require_done: bool = True
+    """Refuse a corrected review sheet with rows nobody has ticked off. Turned
+    off for the case where somebody worked through every row but forgot to
+    tick them, which is otherwise an hour of clicking to recover from."""
+
+
+def _sample_page_indexes(reports: tp.Sequence[batching.PageReport],
                          path: pathlib.Path) -> tp.List[int]:
-    """One front and one back page of this file, if it has both."""
-    wanted: tp.Dict[int, int] = {}
-    for sheet in sheets:
-        for page in sheet.pages:
-            if page.path != path:
-                continue
-            if page.position_in_sheet not in wanted:
-                wanted[page.position_in_sheet] = page.page_index
-            if len(wanted) >= CALIBRATION_PAGES:
-                break
+    """One front and one back page of this file, if it has both.
+
+    Taken from the sides actually read off the pages, so a file that turns out
+    to hold only backs still calibrates from pages it really contains.
+    """
+    wanted: tp.Dict[tp.Optional[int], int] = {}
+    for report in reports:
+        if report.path != path or report.blank or not report.readable:
+            continue
+        if report.side not in wanted:
+            wanted[report.side] = report.page_index
+        if len(wanted) >= CALIBRATION_PAGES:
+            break
     return sorted(wanted.values())
 
 
@@ -362,6 +535,13 @@ def resolve_batch_folder(base: pathlib.Path,
 
 
 class RunResult(tp.NamedTuple):
+    override_problems: tp.List[str]
+    """Corrections that named no test, or more than one."""
+
+    reports: tp.List[batching.PageReport]
+    """Every page of the batch and what became of it."""
+
+    sheets: tp.List[batching.Sheet]
     rows: tp.List[TestRow]
     unclear: tp.List[review_module.UnclearRow]
     missing: tp.List[review_module.MissingRow]
@@ -392,7 +572,8 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
     latin_level = reading.read_choice(scan.latin_level, thresholds) \
         or front_level
 
-    def note_unclear(group: reading.BubbleGroup, test_id: str):
+    def note_unclear(group: reading.BubbleGroup, test_id: str,
+                     test_number: int = 0):
         unclear.append(
             review_module.UnclearRow(batch=batch,
                                      source_file=name,
@@ -400,6 +581,7 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
                                      student_id=student_id,
                                      test_id=test_id,
                                      location=group.location,
+                                     test_number=test_number,
                                      guess=frozenset(
                                          group.selected(thresholds))))
 
@@ -430,7 +612,7 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
         test_id = reading.read_digits(digits, thresholds)
         for group in digits:
             if group.unclear(thresholds):
-                note_unclear(group, test_id)
+                note_unclear(group, test_id, test_number)
             elif len(group.selected(thresholds)) != 1:
                 note_missing(f"Test {test_number} ID")
 
@@ -441,7 +623,7 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
             # A question left blank is the student's choice, not an error.
             if group.unclear(thresholds):
                 needs_review = True
-                note_unclear(group, test_id)
+                note_unclear(group, test_id, test_number)
         rows.append(
             TestRow(batch=batch,
                     source_file=name,
@@ -462,8 +644,13 @@ def run(options: RunOptions,
         ) -> RunResult:
     """Read a batch and write every output file.
 
-    Raises BreakingError only for problems that mean nothing should be written
-    at all: an unusable key file, a mis-collated batch, an unreadable page.
+    Every sheet that can be read is read. A page that cannot be used is set
+    aside with a reason and reported in ``Pages.csv``, rather than taking the
+    rest of the batch down with it, so one bad scan costs one paper.
+
+    Raises BreakingError only when there is nothing worth writing: an unusable
+    key file, no scans at all, or a batch in which not one sheet could be
+    read.
     """
     from . import file_handling
 
@@ -497,9 +684,13 @@ def run(options: RunOptions,
                  f"{console_module.quoted_list(names)}.")
 
     try:
-        sheets = batching.plan_batch(image_paths, variant.pages_per_sheet)
+        reports = batching.list_pages(image_paths)
     except batching.PageOrderError as error:
         raise BreakingError(str(error))
+    if not reports:
+        raise BreakingError(f"No pages found in '{scans}'.")
+    by_page = {(report.path, report.page_index): report
+               for report in reports}
 
     pinned: tp.Optional[th.PartialThresholds] = None
     if options.threshold_spec:
@@ -509,35 +700,33 @@ def run(options: RunOptions,
             raise BreakingError(str(error))
 
     # --- measure every bubble, judging nothing yet ---
-    by_file: tp.Dict[pathlib.Path, tp.List[batching.PageRef]] = {}
-    for sheet in sheets:
-        for page in sheet.pages:
-            by_file.setdefault(page.path, []).append(page)
-
+    #
+    # Which side each page is comes off the page itself, from the solid
+    # page-code mark, so nothing here depends on the pages having been fed in
+    # the right order.
     scans_by_page: tp.Dict[tp.Tuple[pathlib.Path, int], reading.PageScan] = {}
-    unreadable: tp.List[str] = []
-    for path in image_paths:
-        pages = by_file.get(path, [])
-        with console.progress(f"Processing '{path.name}'.", len(pages)) as bar:
-            for page, image in batching.iter_batch_pages(
-                    [batching.Sheet(0, tuple(pages))]):
-                page_variant = variant.variant_for_page(page.position_in_sheet)
-                try:
-                    scans_by_page[(path, page.page_index)] = reading.scan_page(
-                        image, page_variant, page.position_in_sheet,
-                        latin_levels=text.latin_levels)
-                except corner_finding.CornerFindingError as error:
-                    unreadable.append(f"{page.label}: {error}")
+    with console.progress("Reading pages.", len(reports)) as bar:
+        for path, page_index, image in batching.iter_pages(image_paths):
+            report = by_page.get((path, page_index))
+            if report is None:
+                continue
+            if image_utils.is_blank(image):
+                report.blank = True
                 bar.step()
-
-    if unreadable:
-        raise BreakingError(
-            "The corner marks could not be found on "
-            + console_module.plural(len(unreadable), "page")
-            + ", so the grid could not be established:"
-            + "".join(f"{NEWLINE}  {item}" for item in unreadable)
-            + f"{NEWLINE}Re-scan those pages flat, with auto-crop and "
-            "auto-rotate switched off.")
+                continue
+            try:
+                scan = reading.scan_page_either_side(
+                    image, variant, latin_levels=text.latin_levels)
+            except corner_finding.CornerFindingError as error:
+                report.readable = False
+                report.note = (
+                    f"{error} Re-scan this page flat, with auto-crop and "
+                    "auto-rotate switched off.")
+                bar.step()
+                continue
+            scans_by_page[(path, page_index)] = scan
+            report.side = scan.page_side
+            bar.step()
 
     # --- a cutoff per input file ---
     per_file: tp.List[tp.Tuple[str, th.Thresholds]] = []
@@ -551,7 +740,7 @@ def run(options: RunOptions,
             continue
         answer_fills: tp.List[float] = []
         metadata_fills: tp.List[float] = []
-        for index in _sample_page_indexes(sheets, path):
+        for index in _sample_page_indexes(reports, path):
             scan = scans_by_page.get((path, index))
             if scan is None:
                 continue
@@ -564,43 +753,61 @@ def run(options: RunOptions,
         per_file.append((path.name, calibrated))
         notes.extend(f"{path.name}: {note}" for note in file_notes)
 
+    # --- read the identifiers, so that pages can be matched on them ---
+    for report in reports:
+        scan = scans_by_page.get((report.path, report.page_index))
+        if scan is None:
+            continue
+        thresholds = thresholds_by_file[report.path]
+        report.student_id = reading.read_digits(scan.student_id, thresholds)
+        report.test_ids = tuple(
+            reading.read_digits(digits, thresholds)
+            for digits in scan.test_id_digits)
+
+    # --- work out which pages make up which sheet ---
+    batching.mark_blanks(reports, options.skip_blanks)
+    sheets = batching.pair_pages(reports, options.sides)
+    set_aside = [report for report in reports
+                 if report.status in batching.SET_ASIDE]
+    if not sheets:
+        raise BreakingError(
+            "Not one sheet in this batch could be read."
+            + "".join(f"{NEWLINE}  {report.label}: {report.note}"
+                      for report in set_aside[:10])
+            + (f"{NEWLINE}  ... and "
+               f"{len(set_aside) - 10} more" if len(set_aside) > 10 else ""))
+    if set_aside:
+        console.line(
+            console_module.plural(len(set_aside), "page")
+            + " could not be graded and "
+            + ("is" if len(set_aside) == 1 else "are")
+            + f" listed in {PAGES_FILENAME}.")
+
     # --- now judge ---
     rows: tp.List[TestRow] = []
     unclear: tp.List[review_module.UnclearRow] = []
     missing: tp.List[review_module.MissingRow] = []
-    front_id = front_level = ""
     for sheet in sheets:
         # field name -> the pages of this sheet it could not be read on
         sheet_missing: tp.Dict[str, tp.List[int]] = {}
         sheet_file = ""
+        # Whatever the two sides agreed on between them, settled in pairing.
+        front_id = by_page[(sheet.pages[0].path,
+                            sheet.pages[0].page_index)].student_id
+        front_level = ""
         for page in sheet.pages:
             scan = scans_by_page.get((page.path, page.page_index))
             if scan is None:
                 continue
             thresholds = thresholds_by_file[page.path]
-            page_variant = variant.variant_for_page(page.position_in_sheet)
-            if grid_i.Field.PAGE_CODE in page_variant.fields:
-                side = reading.read_page_side(scan, thresholds)
-                try:
-                    batching.check_page_side(page, side,
-                                             ("front page", "back page"))
-                except batching.PageOrderError as error:
-                    raise BreakingError(str(error))
-            if page.position_in_sheet == 0:
-                front_id = front_level = ""
             tests_before = sum(
                 len(variant.variant_for_page(index).question_columns)
                 for index in range(page.position_in_sheet))
-            page_rows, page_unclear, page_missing, own_id, level = _interpret(
+            page_rows, page_unclear, page_missing, _, level = _interpret(
                 scan, page, batch_label, thresholds, front_id, front_level,
                 tests_before, options.tests)
             if page.position_in_sheet == 0:
-                front_id, front_level = own_id, level
-            else:
-                try:
-                    batching.check_student_id(page, front_id, own_id)
-                except batching.PageOrderError as error:
-                    raise BreakingError(str(error))
+                front_level = level
             rows.extend(page_rows)
             unclear.extend(page_unclear)
             sheet_file = page.path.name
@@ -616,18 +823,20 @@ def run(options: RunOptions,
                                          field=field))
 
     # --- human corrections, then scoring ---
+    override_problems: tp.List[str] = []
     if options.override_files:
         try:
-            overrides = review_module.load(list(options.override_files))
+            overrides = review_module.load(
+                list(options.override_files),
+                require_done=options.require_done)
         except review_module.OverrideError as error:
             raise BreakingError(str(error))
-        apply_overrides(rows, overrides)
-        unclear = [row for row in unclear
-                   if row.key() not in overrides.answers]
-        missing = [
-            row for row in missing
-            if not any(key in overrides.values for key in row.keys())
-        ]
+        applied = apply_overrides(rows, overrides)
+        override_problems = applied.problems
+        unclear = [row for row in unclear if row.key() not in applied.settled]
+        missing = [row for row in missing
+                   if (row.source_file, row.field) not in
+                   applied.settled_values]
     score_rows(rows, keys)
 
     written: tp.List[pathlib.Path] = []
@@ -635,6 +844,8 @@ def run(options: RunOptions,
     written.append(results_path)
     written.append(
         write_question_stats(output / STATS_FILENAME, rows, keys, questions))
+    written.append(
+        write_page_report(output / PAGES_FILENAME, reports, batch_label))
 
     prefix = (f"Batch {batch_label}{review_module.BATCH_SEPARATOR}"
               if batch_label else "")
@@ -659,10 +870,14 @@ def run(options: RunOptions,
     if options.annotate:
         annotated = annotation.write_marked_up(
             image_paths, scans_by_page, sheets, rows, thresholds_by_file, keys,
-            output / ANNOTATED_DIRNAME, console, options.tests)
+            output / ANNOTATED_DIRNAME, console, options.tests,
+            options.annotate_students)
         written.extend(annotated)
 
-    return RunResult(rows=rows,
+    return RunResult(reports=reports,
+                     override_problems=override_problems,
+                     sheets=sheets,
+                     rows=rows,
                      unclear=unclear,
                      missing=missing,
                      results_path=results_path,

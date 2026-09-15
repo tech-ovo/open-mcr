@@ -30,6 +30,11 @@ class SheetData(tp.NamedTuple):
     """What to bubble onto one two-page sheet."""
 
     student_id: str
+    back_student_id: tp.Optional[str] = None
+    """What the back page says, when that differs from the front. A digit
+    written as a non-digit (``04?75``) is simply left unbubbled, which is what
+    a student who skipped it would leave behind."""
+
     latin_level: tp.Optional[str] = None
     test_ids: tp.Sequence[str] = ("1001", "1002", "1003")
     answers: tp.Sequence[tp.Sequence[str]] = ()
@@ -124,8 +129,12 @@ def render_sheet(sheet: SheetData,
     pages = [page.copy() for page in _blank_pages(text)]
     levels = text.latin_levels if text else layout.LATIN_LEVELS
 
-    for page in pages:
-        _stamp_digits(page, layout.STUDENT_ID_COLUMN, sheet.student_id)
+    ids = [sheet.student_id,
+           sheet.student_id if sheet.back_student_id is None
+           else sheet.back_student_id]
+    for index, page in enumerate(pages):
+        _stamp_digits(page, layout.STUDENT_ID_COLUMN,
+                      ids[index] if index < len(ids) else sheet.student_id)
 
     if sheet.latin_level:
         index = levels.index(sheet.latin_level)
@@ -162,6 +171,15 @@ def render_sheet(sheet: SheetData,
     return pages
 
 
+def blank_page(text: tp.Optional[layout.SheetText] = None) -> np.ndarray:
+    """An empty sheet of paper, the size of a scanned page.
+
+    What a duplex scanner produces for the reverse of a single-sided
+    original.
+    """
+    return np.full_like(_blank_pages(text)[0], 255)
+
+
 def write_pdf(pages: tp.Sequence[np.ndarray], path: pathlib.Path
               ) -> pathlib.Path:
     """Save a sequence of page images as a multi-page PDF."""
@@ -186,6 +204,70 @@ def write_batch(sheets: tp.Sequence[SheetData], path: pathlib.Path,
     if page_order is not None:
         pages = [pages[index] for index in page_order]
     return write_pdf(pages, path)
+
+
+# --- damaging a page, to exercise the corner-finding fallbacks -----------
+
+
+def _corner_pixels(page: np.ndarray, which: str) -> tp.Tuple[int, int]:
+    """Roughly where one corner mark sits, in pixels."""
+    height, width = page.shape[:2]
+    inset = layout.CORNER_INSET_IN
+    x = inset if which in ("tl", "bl") else layout.PAGE_WIDTH_IN - inset
+    y = inset if which in ("tl", "tr") else layout.PAGE_HEIGHT_IN - inset
+    return (int(x / layout.PAGE_WIDTH_IN * width),
+            int(y / layout.PAGE_HEIGHT_IN * height))
+
+
+def scribble_over(page: np.ndarray, which: str,
+                  gray: int = 120) -> np.ndarray:
+    """Draw a squiggle across one corner mark.
+
+    Composited with a minimum, because that is what ink on paper does: it can
+    only darken. Drawing the stroke straight onto the page would *lighten* the
+    black mark underneath, which no pen can do, and would be testing damage
+    that cannot happen.
+    """
+    x, y = _corner_pixels(page, which)
+    stroke = np.full_like(page, 255)
+    points = np.array([[x - 60, y - 10], [x - 20, y + 35],
+                       [x + 25, y - 30], [x + 70, y + 20]], np.int32)
+    cv2.polylines(stroke, [points], False, int(gray), thickness=9,
+                  lineType=cv2.LINE_AA)
+    return np.minimum(page, stroke)
+
+
+def shade_out(page: np.ndarray, which: str) -> np.ndarray:
+    """Black one corner mark out completely, so it has no shape left.
+
+    Drawn over the mark's own footprint and a little wider, which is what
+    somebody filling one in with a pen would leave behind.
+    """
+    page = page.copy()
+    x, y = _corner_pixels(page, which)
+    per_inch = page.shape[1] / layout.PAGE_WIDTH_IN
+    if which == "tl":
+        half = int(layout.L_MARK_SIZE_IN * per_inch) // 2   # hangs inwards
+        cv2.rectangle(page, (x - half - 4, y - half - 4),
+                      (x + half + 4, y + 4), 0, -1)
+        cv2.rectangle(page, (x - half - 4, y - half - 4),
+                      (x + 4, y + half + 4), 0, -1)
+    else:
+        half = int(layout.CORNER_SQUARE_SIZE_IN * per_inch / 2) + 5
+        cv2.rectangle(page, (x - half, y - half), (x + half, y + half), 0, -1)
+    return page
+
+
+def doodle_in_margin(page: np.ndarray) -> np.ndarray:
+    """Idle scribbles well away from the marks."""
+    page = page.copy()
+    height, width = page.shape[:2]
+    for offset in range(5):
+        y = int(height * 0.35) + offset * 26
+        cv2.line(page, (30, y), (int(width * 0.06), y + 18), 90, 7)
+    cv2.putText(page, "hi!!", (24, int(height * 0.55)),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.4, 70, 3)
+    return page
 
 
 def answer_key(letter: str = "A") -> tp.List[str]:

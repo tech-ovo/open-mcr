@@ -10,10 +10,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import cv2
 import pytest
 
 import synthetic_sheets as ss
-from src import answer_key, console, grid_info, pipeline, reading
+from src import answer_key, batching, console, corner_finding, grid_info
+from src import pipeline
+from src import reading
 from src import review, sheet_layout as layout, thresholds as th
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -200,6 +203,71 @@ def test_one_test_id_can_carry_a_key_per_level(tmp_path):
     assert upper.score(marked)[0] == 0
 
 
+# --- corner finding under damage ----------------------------------------
+#
+# A student who scribbles near the corner marks must not cost anybody their
+# paper. Each case here is read all the way through to answers, not merely
+# checked for "found some corners": a grid that is slightly wrong still finds
+# corners, and then quietly reports the wrong marks.
+
+
+def _read_front(page):
+    """Read a damaged front page, returning (student id, answers)."""
+    variant = grid_info.form_cajcl.variant_for_page(0)
+    # The synthetic pages are grayscale; a real scan arrives as colour.
+    scan = reading.scan_page(cv2.cvtColor(page, cv2.COLOR_GRAY2BGR),
+                             variant, 0)
+    cutoffs = th.calibrate(scan.answer_fills, scan.metadata_fills)[0]
+    answers = "".join(
+        sorted(group.selected(cutoffs))[0]
+        if len(group.selected(cutoffs)) == 1 else "?"
+        for group in scan.tests[0][1])
+    return reading.read_digits(scan.student_id, cutoffs), answers
+
+
+@pytest.fixture(scope="module")
+def damaged_front():
+    """One filled-in front page, and what reading it should produce."""
+    answers = [("ABCDE" * 16)[index] for index in range(QUESTIONS)]
+    sheet = ss.SheetData(student_id="04275", latin_level="HS-1",
+                         answers=[answers, [], []])
+    return ss.render_sheet(sheet)[0], "04275", "".join(answers)
+
+
+@pytest.mark.parametrize("damage", [
+    pytest.param(lambda page: page, id="undamaged"),
+    pytest.param(ss.doodle_in_margin, id="doodles-in-the-margin"),
+    pytest.param(lambda page: ss.scribble_over(page, "tr"),
+                 id="pencil-over-one-mark"),
+    pytest.param(lambda page: ss.scribble_over(page, "tr", gray=40),
+                 id="pen-over-one-mark"),
+    pytest.param(
+        lambda page: ss.scribble_over(ss.scribble_over(page, "tr", gray=40),
+                                      "bl", gray=40),
+        id="pen-over-two-marks"),
+    pytest.param(lambda page: ss.shade_out(page, "tr"),
+                 id="corner-square-blacked-out"),
+    pytest.param(lambda page: ss.shade_out(page, "tl"),
+                 id="l-mark-blacked-out"),
+    pytest.param(lambda page: ss.shade_out(ss.shade_out(page, "tl"), "tr"),
+                 id="two-marks-blacked-out"),
+])
+def test_a_damaged_page_is_still_read_correctly(damaged_front, damage):
+    page, student_id, answers = damaged_front
+    got_id, got_answers = _read_front(damage(page))
+    assert got_id == student_id
+    assert got_answers == answers
+
+
+def test_corner_finding_refuses_a_page_with_no_marks(tmp_path):
+    """Recovering from damage must not turn into inventing a grid."""
+    blank = ss.render_sheet(ss.SheetData(student_id="04275"))[0].copy()
+    blank[:, :] = 255
+    with pytest.raises(corner_finding.CornerFindingError):
+        reading.scan_page(cv2.cvtColor(blank, cv2.COLOR_GRAY2BGR),
+                          grid_info.form_cajcl.variant_for_page(0), 0)
+
+
 def test_key_rejects_two_tests_sharing_an_id_and_a_level(tmp_path):
     path = write_key(tmp_path / "k.csv", [
         ("Lower", "1002", "MS-1, MS-2, HS-1", cycled(0)),
@@ -219,18 +287,96 @@ def test_key_rejects_a_shared_id_where_one_allows_every_level(tmp_path):
         answer_key.load(path)
 
 
-def test_key_refuses_the_old_excluded_row(tmp_path):
-    """Reading it as Allowed would score exactly the wrong students."""
-    path = tmp_path / "old.csv"
+def _write_key_with_level_row(path, label, cells):
+    """A one-test key file whose level row is named by the caller."""
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([answer_key.NAME_ROW] + ["Test " + str(index + 1)
+                                                 for index in
+                                                 range(len(cells))])
+        writer.writerow([answer_key.TEST_ID_ROW] +
+                        [str(1001 + index) for index in range(len(cells))])
+        writer.writerow([label] + list(cells))
+        for number in range(1, QUESTIONS + 1):
+            writer.writerow([str(number)] + ["A"] * len(cells))
+    return path
+
+
+def test_key_reads_an_excluded_row_as_the_levels_left_over(tmp_path):
+    """The two rows are opposite ways of saying the same thing."""
+    path = _write_key_with_level_row(tmp_path / "ex.csv",
+                                     answer_key.EXCLUDED_ROW, ["HS-Adv"])
+    key = answer_key.load(path)["1001"]
+    assert "HS-ADV" not in key.allowed_levels
+    assert "HS-1" in key.allowed_levels
+    assert len(key.allowed_levels) == len(layout.LATIN_LEVELS) - 1
+
+
+def test_key_reads_a_blank_excluded_row_as_every_level(tmp_path):
+    """The template ships this row blank, so it has to mean 'no restriction'."""
+    path = _write_key_with_level_row(tmp_path / "ex.csv",
+                                     answer_key.EXCLUDED_ROW, [""])
+    key = answer_key.load(path)["1001"]
+    assert len(key.allowed_levels) == len(layout.LATIN_LEVELS)
+
+
+def test_key_excluded_and_allowed_agree(tmp_path):
+    """Written either way round, the same file scores the same students."""
+    keep = ["MS-1", "MS-2"]
+    barred = [level for level in layout.LATIN_LEVELS if level not in keep]
+    allowed = answer_key.load(_write_key_with_level_row(
+        tmp_path / "a.csv", answer_key.ALLOWED_ROW,
+        [", ".join(keep)]))["1001"]
+    excluded = answer_key.load(_write_key_with_level_row(
+        tmp_path / "e.csv", answer_key.EXCLUDED_ROW,
+        [", ".join(barred)]))["1001"]
+    assert allowed.allowed_levels == excluded.allowed_levels
+
+
+def test_key_refuses_both_level_rows_at_once(tmp_path):
+    """They can contradict each other, and guessing would score the wrong
+    students."""
+    path = tmp_path / "both.csv"
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow([answer_key.NAME_ROW, "One"])
         writer.writerow([answer_key.TEST_ID_ROW, "1001"])
-        writer.writerow(["Excluded", "HS-Adv"])
+        writer.writerow([answer_key.ALLOWED_ROW, "HS-1"])
+        writer.writerow([answer_key.EXCLUDED_ROW, "MS-1"])
         for number in range(1, QUESTIONS + 1):
             writer.writerow([str(number), "A"])
-    with pytest.raises(answer_key.AnswerKeyError, match="was replaced by"):
+    with pytest.raises(answer_key.AnswerKeyError, match="delete the other"):
         answer_key.load(path)
+
+
+def test_key_refuses_an_excluded_row_that_bars_everyone(tmp_path):
+    path = _write_key_with_level_row(
+        tmp_path / "none.csv", answer_key.EXCLUDED_ROW,
+        [", ".join(layout.LATIN_LEVELS)])
+    with pytest.raises(answer_key.AnswerKeyError, match="bars every"):
+        answer_key.load(path)
+
+
+def test_key_refuses_a_file_with_no_level_row_at_all(tmp_path):
+    path = tmp_path / "bare.csv"
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow([answer_key.NAME_ROW, "One"])
+        writer.writerow([answer_key.TEST_ID_ROW, "1001"])
+        for number in range(1, QUESTIONS + 1):
+            writer.writerow([str(number), "A"])
+    with pytest.raises(answer_key.AnswerKeyError, match="Excluded"):
+        answer_key.load(path)
+
+
+def test_key_template_ships_a_blank_excluded_row(tmp_path):
+    """Whatever the template writes has to load without editing."""
+    path = answer_key.write_template(tmp_path / "Keys.csv")
+    body = path.read_text(encoding="utf-8")
+    assert answer_key.EXCLUDED_ROW in body
+    assert answer_key.ALLOWED_ROW not in body
+    for key in answer_key.load(path):
+        assert len(key.allowed_levels) == len(layout.LATIN_LEVELS)
 
 
 def test_key_rejects_an_unknown_latin_level(tmp_path):
@@ -497,7 +643,8 @@ def test_a_faint_mark_goes_to_the_unclear_sheet(tmp_path):
     rows = read_csv(out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv")
     assert rows[0] == review.unclear_header()
     assert rows[1][0] == "3"
-    assert set(rows[1][6:11]) <= {"TRUE", "FALSE"}
+    options = [rows[0].index(option) for option in layout.OPTIONS]
+    assert set(rows[1][index] for index in options) <= {"TRUE", "FALSE"}
 
 
 def test_a_blank_question_is_not_an_error(tmp_path):
@@ -539,11 +686,203 @@ def test_a_missing_student_id_is_asked_for_once_not_per_digit(tmp_path):
     assert len(body) == 1 and body[0][2] == "1,2"
 
 
-def test_out_of_order_pages_are_breaking(tmp_path):
+def _pages_csv(out):
+    rows = read_csv(out / pipeline.PAGES_FILENAME)
+    header = rows[0]
+    return [dict(zip(header, row)) for row in rows[1:]]
+
+
+def test_a_batch_of_one_swapped_sheet_is_breaking(tmp_path):
+    """With nothing left to grade there is no output worth writing."""
     sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
                          answers=[cycled(0), cycled(1), cycled(2)])
-    with pytest.raises(pipeline.BreakingError, match="back page"):
+    with pytest.raises(pipeline.BreakingError, match="could be read"):
         grade(tmp_path, [sheet], page_order=[1, 0])
+
+
+def test_one_swapped_sheet_does_not_cost_the_others(tmp_path):
+    """The whole point: a bad sheet costs its own paper and nothing else."""
+    sheets = [
+        ss.SheetData(student_id=f"0427{index}", latin_level="MS-1",
+                     test_ids=TEST_IDS,
+                     answers=[cycled(0), cycled(1), cycled(2)])
+        for index in range(3)
+    ]
+    # Turn the middle sheet's two pages around: pages 2 and 3 of six.
+    result, out = grade(tmp_path, sheets, page_order=[0, 1, 3, 2, 4, 5])
+
+    graded = {report.student_id for report in result.reports
+              if report.status == batching.GRADED}
+    assert graded == {"04270", "04272"}
+    assert len(result.sheets) == 2
+    assert {row.student_id for row in result.rows} == {"04270", "04272"}
+
+    set_aside = [report for report in result.reports
+                 if report.status == batching.UNPAIRED]
+    assert len(set_aside) == 2
+    assert all("04271" == report.student_id for report in set_aside)
+
+    listed = _pages_csv(out)
+    assert len(listed) == 6
+    assert sum(1 for row in listed if row["Status"] == batching.GRADED) == 4
+    assert all(row["Note"] for row in listed
+               if row["Status"] == batching.UNPAIRED)
+
+
+def test_the_page_report_covers_a_clean_batch_too(tmp_path):
+    """"Did every paper come back?" needs an answer on good days as well."""
+    sheets = [ss.SheetData(student_id="04275", latin_level="MS-1",
+                           test_ids=TEST_IDS,
+                           answers=[cycled(0), cycled(1), cycled(2)])]
+    _, out = grade(tmp_path, sheets)
+    listed = _pages_csv(out)
+    assert [row["Status"] for row in listed] == [batching.GRADED] * 2
+    assert [row["Side"] for row in listed] == ["front", "back"]
+    assert listed[0]["Paired With"] == "page 2"
+    assert listed[1]["Paired With"] == "page 1"
+    assert all(row["Student ID"] == "04275" for row in listed)
+
+
+def test_a_digit_left_unbubbled_on_both_sides_still_pairs(tmp_path):
+    """A student who skipped a digit has not mis-collated anything."""
+    sheet = ss.SheetData(student_id="04?75", back_student_id="04?75",
+                         latin_level="MS-1", test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    result, _ = grade(tmp_path, [sheet])
+    assert len(result.sheets) == 1
+    assert {row.student_id for row in result.rows} == {"04?75"}
+
+
+def test_a_digit_readable_on_only_one_side_is_taken_from_the_other(tmp_path):
+    sheet = ss.SheetData(student_id="04275", back_student_id="04?75",
+                         latin_level="MS-1", test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    result, _ = grade(tmp_path, [sheet])
+    assert len(result.sheets) == 1
+    assert {row.student_id for row in result.rows} == {"04275"}
+
+
+def test_sides_that_really_disagree_set_that_sheet_aside(tmp_path):
+    sheets = [
+        ss.SheetData(student_id="04275", back_student_id="04276",
+                     latin_level="MS-1", test_ids=TEST_IDS,
+                     answers=[cycled(0), cycled(1), cycled(2)]),
+        ss.SheetData(student_id="04280", latin_level="MS-1",
+                     test_ids=TEST_IDS,
+                     answers=[cycled(0), cycled(1), cycled(2)]),
+    ]
+    result, out = grade(tmp_path, sheets)
+    assert {row.student_id for row in result.rows} == {"04280"}
+    mismatched = [report for report in result.reports
+                  if report.status == batching.ID_MISMATCH]
+    assert len(mismatched) == 2
+    assert "04275" in mismatched[0].note and "04276" in mismatched[0].note
+
+
+# --- one-sided scans -------------------------------------------------------
+
+
+def _one_sided(tmp_path, pages, sides, skip_blanks=False, **options):
+    scans = tmp_path / "scans"
+    scans.mkdir(parents=True, exist_ok=True)
+    ss.write_pdf(pages, scans / "batch.pdf")
+    run_options = pipeline.RunOptions(input_folder=scans,
+                                      output_folder=tmp_path / "out",
+                                      sides=sides, skip_blanks=skip_blanks,
+                                      **options)
+    return pipeline.run(run_options, console.Console(enabled=False))
+
+
+def test_a_front_only_scan_grades_the_first_test(tmp_path):
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    fronts = [ss.render_sheet(sheet)[0]]
+    result = _one_sided(tmp_path, fronts, sides=(0,))
+    assert [row.test_number for row in result.rows] == [1]
+    assert result.rows[0].student_id == "04275"
+    assert result.rows[0].latin_level == "MS-1"
+
+
+def test_a_back_only_scan_grades_the_other_two(tmp_path):
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    backs = [ss.render_sheet(sheet)[1]]
+    result = _one_sided(tmp_path, backs, sides=(1,))
+    assert sorted(row.test_number for row in result.rows) == [2, 3]
+    # The Latin level lives on the front page, so a back-only scan has none.
+    assert all(row.latin_level == "" for row in result.rows)
+
+
+def test_the_wrong_side_is_set_aside_not_misread(tmp_path):
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    front, back = ss.render_sheet(sheet)
+    result = _one_sided(tmp_path, [front, back], sides=(0,))
+    assert [row.test_number for row in result.rows] == [1]
+    wrong = [report for report in result.reports
+             if report.status == batching.WRONG_SIDE]
+    assert len(wrong) == 1 and wrong[0].side == 1
+
+
+def test_blank_pages_are_skipped_when_asked(tmp_path):
+    """A duplex scan of one-sided originals: printed, blank, printed, blank."""
+    sheets = [ss.SheetData(student_id=f"0427{index}", latin_level="MS-1",
+                           test_ids=TEST_IDS,
+                           answers=[cycled(0), cycled(1), cycled(2)])
+              for index in range(2)]
+    pages = []
+    for sheet in sheets:
+        pages.extend([ss.render_sheet(sheet)[0], ss.blank_page()])
+    result = _one_sided(tmp_path, pages, sides=(0,), skip_blanks=True)
+    assert len(result.rows) == 2
+    assert {report.status for report in result.reports} == {
+        batching.GRADED, batching.BLANK}
+
+
+def test_the_blank_may_come_before_or_after(tmp_path):
+    """Only one blank per pair is required, not a fixed order."""
+    sheets = [ss.SheetData(student_id=f"0427{index}", latin_level="MS-1",
+                           test_ids=TEST_IDS,
+                           answers=[cycled(0), cycled(1), cycled(2)])
+              for index in range(2)]
+    first, second = (ss.render_sheet(sheet)[0] for sheet in sheets)
+    pages = [first, ss.blank_page(), ss.blank_page(), second]
+    result = _one_sided(tmp_path, pages, sides=(0,), skip_blanks=True)
+    assert len(result.rows) == 2
+    assert not [report for report in result.reports
+                if report.status == batching.UNEXPECTED_BLANK]
+
+
+def test_a_blank_that_breaks_the_rhythm_is_flagged(tmp_path):
+    """Two printed pages together means a blank has gone missing."""
+    sheets = [ss.SheetData(student_id=f"0427{index}", latin_level="MS-1",
+                           test_ids=TEST_IDS,
+                           answers=[cycled(0), cycled(1), cycled(2)])
+              for index in range(2)]
+    first, second = (ss.render_sheet(sheet)[0] for sheet in sheets)
+    pages = [first, second, ss.blank_page(), ss.blank_page()]
+    result = _one_sided(tmp_path, pages, sides=(0,), skip_blanks=True)
+    assert len(result.rows) == 2      # both papers still graded
+    odd = [report for report in result.reports
+           if report.status == batching.UNEXPECTED_BLANK]
+    assert len(odd) == 2
+    assert all("missed at the scanner" in report.note for report in odd)
+
+
+def test_an_unexpected_blank_in_a_two_sided_scan_is_flagged(tmp_path):
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    front, back = ss.render_sheet(sheet)
+    result = _one_sided(tmp_path, [front, back, ss.blank_page()],
+                        sides=(0, 1))
+    assert len(result.sheets) == 1
+    odd = [report for report in result.reports
+           if report.status == batching.UNEXPECTED_BLANK]
+    assert len(odd) == 1
 
 
 def test_batch_folders_are_used(tmp_path):
@@ -604,7 +943,7 @@ def test_overrides_are_folded_in(tmp_path):
     reloaded = pipeline.read_results(out / pipeline.RESULTS_FILENAME)
     applied = pipeline.apply_overrides(
         reloaded, review.load([unclear_path]))
-    assert applied >= 1
+    assert applied.changed >= 1
     test1 = next(row for row in reloaded if row.test_id == "1001")
     assert test1.marked[6] == {"B"}
 
@@ -616,7 +955,7 @@ def test_an_unticked_review_row_is_refused(tmp_path):
                          faint={0: [7]}, faint_fraction=0.5)
     _, out = grade(tmp_path, [sheet], batch="3")
     path = out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv"
-    with pytest.raises(review.NotFinishedError, match="not been ticked"):
+    with pytest.raises(review.NotFinishedError, match="have been ticked"):
         review.load([path])
 
 
@@ -631,7 +970,198 @@ def test_a_correction_that_changes_nothing_is_not_counted(tmp_path):
     # the reader already decided, so nothing has changed.
     _tick(path, columns=("Done", ))
     rows = pipeline.read_results(out / pipeline.RESULTS_FILENAME)
-    assert pipeline.apply_overrides(rows, review.load([path])) == 0
+    assert pipeline.apply_overrides(rows, review.load([path])).changed == 0
+
+
+# --- addressing a correction ----------------------------------------------
+
+
+def _unclear_csv(path, rows):
+    """Write a review sheet by hand, the way a person adding a row would."""
+    header = list(review.unclear_header())
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        for values in rows:
+            line = [""] * len(header)
+            for name, value in values.items():
+                line[header.index(name)] = value
+            writer.writerow(line)
+    return path
+
+
+def _graded_rows(tmp_path):
+    sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    _, out = grade(tmp_path, [sheet], batch="3")
+    return pipeline.read_results(out / pipeline.RESULTS_FILENAME), out
+
+
+def test_the_two_tests_on_the_back_page_are_corrected_separately(tmp_path):
+    """Both number their questions from 1, so page alone cannot tell them
+    apart - correcting one used to rewrite the other."""
+    rows, out = _graded_rows(tmp_path)
+    second = next(row for row in rows if row.test_number == 2)
+    third = next(row for row in rows if row.test_number == 3)
+    before = set(third.marked[4])
+
+    path = _unclear_csv(tmp_path / "fix.csv", [{
+        "File": second.source_file, "Page": str(second.page),
+        "Test": "2", "Question": "5", "A": "TRUE", "Done": "TRUE",
+    }])
+    applied = pipeline.apply_overrides(rows, review.load([path]))
+
+    assert not applied.problems
+    assert second.marked[4] == {"A"}
+    assert third.marked[4] == before
+
+
+def test_a_row_added_by_hand_is_matched_on_the_ids(tmp_path):
+    """Correcting a bubble that was read wrongly but never flagged."""
+    rows, _ = _graded_rows(tmp_path)
+    target = next(row for row in rows if row.test_number == 2)
+    path = _unclear_csv(tmp_path / "manual.csv", [{
+        "Student ID": target.student_id, "Test ID": target.test_id,
+        "Question": "9", "D": "TRUE", "Done": "TRUE",
+    }])
+    applied = pipeline.apply_overrides(rows, review.load([path]))
+    assert not applied.problems
+    assert applied.changed == 1
+    assert target.marked[8] == {"D"}
+
+
+def test_a_spreadsheet_eating_the_leading_zero_still_matches(tmp_path):
+    """Excel turns 04275 into 4275, and the correction must still land."""
+    rows, _ = _graded_rows(tmp_path)
+    target = next(row for row in rows if row.test_number == 1)
+    path = _unclear_csv(tmp_path / "manual.csv", [{
+        "Student ID": target.student_id.lstrip("0"),
+        "Test ID": target.test_id.lstrip("0"),
+        "Question": "3", "E": "TRUE", "Done": "TRUE",
+    }])
+    applied = pipeline.apply_overrides(rows, review.load([path]))
+    assert not applied.problems
+    assert target.marked[2] == {"E"}
+
+
+def test_a_correction_matching_nothing_is_reported(tmp_path):
+    """Typed by somebody who meant it, so it must not vanish quietly."""
+    rows, _ = _graded_rows(tmp_path)
+    path = _unclear_csv(tmp_path / "manual.csv", [{
+        "Student ID": "99999", "Test ID": "1001",
+        "Question": "3", "E": "TRUE", "Done": "TRUE",
+    }])
+    applied = pipeline.apply_overrides(rows, review.load([path]))
+    assert applied.changed == 0
+    assert len(applied.problems) == 1
+    assert "no test matches" in applied.problems[0]
+    assert "99999" in applied.problems[0]
+
+
+def test_a_correction_matching_several_tests_is_reported(tmp_path):
+    rows, _ = _graded_rows(tmp_path)
+    path = _unclear_csv(tmp_path / "manual.csv", [{
+        "Student ID": "04275", "Question": "3", "E": "TRUE", "Done": "TRUE",
+    }])
+    applied = pipeline.apply_overrides(rows, review.load([path]))
+    assert applied.changed == 0
+    assert len(applied.problems) == 1
+    assert "matches 3 tests" in applied.problems[0]
+
+
+def test_a_row_naming_nothing_at_all_is_refused(tmp_path):
+    path = _unclear_csv(tmp_path / "manual.csv",
+                        [{"Question": "3", "E": "TRUE", "Done": "TRUE"}])
+    with pytest.raises(review.OverrideError, match="which test"):
+        review.load([path])
+
+
+# --- more than one round ---------------------------------------------------
+
+
+def test_an_untouched_row_still_needs_review_afterwards(tmp_path):
+    """Otherwise a second round has nothing left to work from: every row
+    came back looking settled whether or not anybody had looked at it."""
+    sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)],
+                         faint={0: [7], 1: [9]}, faint_fraction=0.5)
+    _, out = grade(tmp_path, [sheet], batch="3")
+    rows = pipeline.read_results(out / pipeline.RESULTS_FILENAME)
+    assert sum(1 for row in rows if row.needs_review) == 2
+
+    # Settle only the first test's question.
+    first = next(row for row in rows if row.test_number == 1)
+    path = _unclear_csv(tmp_path / "round1.csv", [{
+        "File": first.source_file, "Page": str(first.page), "Test": "1",
+        "Question": "7", "B": "TRUE", "Done": "TRUE",
+    }])
+    pipeline.apply_overrides(rows, review.load([path]))
+
+    assert not first.needs_review
+    still = [row for row in rows if row.needs_review]
+    assert [row.test_number for row in still] == [2]
+
+
+def test_outstanding_rows_come_back_for_a_second_round(tmp_path):
+    sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)],
+                         faint={0: [7], 1: [9]}, faint_fraction=0.5)
+    _, out = grade(tmp_path, [sheet], batch="3")
+    original = out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv"
+    rows = read_csv(original)
+    header = rows[0]
+    # Tick only the first of the two rows.
+    rows[1][header.index("Done")] = "TRUE"
+    partial = tmp_path / "partial.csv"
+    with open(partial, "w", newline="", encoding="utf-8") as handle:
+        csv.writer(handle).writerows(rows)
+
+    results = pipeline.read_results(out / pipeline.RESULTS_FILENAME)
+    # The default: unticked rows are left for next time rather than refused.
+    loaded = review.load([partial])
+    applied = pipeline.apply_overrides(results, loaded)
+    left = review.outstanding([partial], applied.origins)
+    assert len(left) == 1
+    name, left_header, left_rows = left[0]
+    assert left_header == header
+    assert len(left_rows) == 1
+    assert left_rows[0][header.index("Done")] != "TRUE"
+
+
+def test_ignoring_the_done_column_lets_an_unticked_sheet_through(tmp_path):
+    sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)],
+                         faint={0: [7]}, faint_fraction=0.5)
+    _, out = grade(tmp_path, [sheet], batch="3")
+    path = out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv"
+    with pytest.raises(review.NotFinishedError):
+        review.load([path])
+    loaded = review.load([path], require_done=False)
+    assert loaded.answers
+    assert loaded.unfinished
+
+
+# --- marked-up copies for only the papers worth checking -------------------
+
+
+def test_marked_up_copies_can_be_limited_to_unreadable_ids():
+    from src import annotation
+    assert annotation.wants_student("04275", None)
+    assert not annotation.wants_student("04275", annotation.UNKNOWN_IDS)
+    assert annotation.wants_student("04?75", annotation.UNKNOWN_IDS)
+    assert annotation.wants_student("", annotation.UNKNOWN_IDS)
+
+
+def test_marked_up_copies_can_be_limited_to_named_students():
+    from src import annotation
+    assert annotation.wants_student("04275", ["04275"])
+    # A spreadsheet will have eaten the leading zero somewhere along the way.
+    assert annotation.wants_student("04275", ["4275"])
+    assert not annotation.wants_student("04276", ["04275"])
 
 
 def test_regrade_rescoring_needs_no_scans(tmp_path):

@@ -33,7 +33,11 @@ function blank() {
     thresholdMode: 'auto',
     threshold: { as: '', ar: '', ms: '', mr: '' },
     annotate: false,
+    annotateWho: '',             // '', 'unknown', or 'list'
+    annotateIds: '',
     onlyTests: null,             // null grades every test on the sheet
+    sides: null,                 // null means both sides were scanned
+    skipBlanks: false,
     batches: [],
     nextBatch: 1,
     limits: null,
@@ -125,6 +129,18 @@ function plural(count, one, many) {
 }
 
 /* "a", "a and b", "a, b, and c" - without the quotes quotedList adds. */
+/* "a", "a and b", "a, b, and c". Separate from quotedPlain, which is only
+   for the kinds of review a batch is waiting on and has its own fallback. */
+function joinList(items, conjunction) {
+  const list = (items || []).filter(Boolean);
+  const word = conjunction || 'and';
+  if (!list.length) return '';
+  if (list.length === 1) return list[0];
+  if (list.length === 2) return list[0] + ' ' + word + ' ' + list[1];
+  return list.slice(0, -1).join(', ') + ', ' + word + ' ' +
+         list[list.length - 1];
+}
+
 function quotedPlain(items) {
   const list = (items || []).slice();
   if (!list.length) return 'unclear or missing';
@@ -278,6 +294,40 @@ function customSheet() {
 /* `withDesign` adds the sheet wording and the advanced settings. The tests,
    answers and results never travel: they would make the link unwieldy, and
    Keys.csv is already a file made to be passed around. */
+/* Rewrite the script's level list to match this sheet. The copy on the
+   server carries the stock names; substituting them here is what keeps the
+   spreadsheet's dropdown from disagreeing with the paper.
+
+   The \r?\n is not decoration: the file is served exactly as it sits in the
+   repository, which on a Windows checkout means CRLF. */
+function scriptWithLevels(body) {
+  const levels = levelNames();
+  if (!levels.length) return body;
+  const listed = levels.map(
+    (name) => "'" + String(name).replace(/\\/g, '\\\\')
+                                .replace(/'/g, "\\'") + "'").join(', ');
+  return body.replace(
+    /\/\* LATIN_LEVELS \*\/\r?\nvar LATIN_LEVELS = \[[^\]]*\];/,
+    '/* LATIN_LEVELS */\nvar LATIN_LEVELS = [' + listed + '];');
+}
+
+/* Hand over Sheet.gs with this sheet's Latin levels written into it. */
+async function downloadScript() {
+  let body;
+  try {
+    const response = await fetch('Sheet.gs');
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    body = await response.text();
+  } catch (error) {
+    return say('msg-review', 'bad',
+               'Could not fetch Sheet.gs (' + error.message +
+               '). Reload the page and try again.');
+  }
+  download('Sheet.gs', scriptWithLevels(body), 'text/plain');
+  say('msg-review', 'ok',
+      'Sheet.gs downloaded, carrying this sheet\u2019s Latin levels.');
+}
+
 function inviteLink(withDesign) {
   const payload = JSON.stringify({
     e: $('endpoint').value.trim(),
@@ -869,6 +919,12 @@ function allowedNames(test) {
   return allowedPositions(test).map((index) => levels[index]);
 }
 
+/* The other way round, which is what the file is written with. */
+function excludedNames(test) {
+  const allowed = allowedPositions(test);
+  return levelNames().filter((_, index) => !allowed.includes(index));
+}
+
 function csvCell(value) {
   const text = String(value == null ? '' : value);
   return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
@@ -882,10 +938,12 @@ function buildKeyCsv(withAnswers = true) {
   const rows = [
     ['Name'].concat(tests.map((test) => test.name)),
     ['Test ID'].concat(tests.map((test) => test.id)),
-    // Blank means every level, which is both shorter and what the server
-    // reads a blank cell as.
-    ['Allowed'].concat(tests.map(
-      (test) => (allowsEveryLevel(test) ? '' : allowedNames(test).join(', ')))),
+    /* Excluded rather than Allowed, so the common case is a blank cell.
+       A test nobody is barred from then stays correct when a Latin level is
+       added or removed later, where a written-out Allowed list would quietly
+       start excluding the new one. The server reads either row. */
+    ['Excluded'].concat(tests.map(
+      (test) => (allowsEveryLevel(test) ? '' : excludedNames(test).join(', ')))),
   ];
   for (let number = 1; number <= need; number++) {
     rows.push([String(number)].concat(tests.map(
@@ -996,6 +1054,7 @@ function updateKeyMessage() {
   const answersExist = state.tests.some((test) => answered(test) > 0);
   $('download-key').hidden =
     !answersExist || (!!state.keySource && !overwritten.length);
+  $('download-key-note').hidden = $('download-key').hidden;
   $('download-key-row').classList.toggle('empty', $('download-key').hidden);
   $('undo-key').hidden = !state.undo;
   renderTidyButtons();
@@ -1075,14 +1134,18 @@ function readKeyCsv(text, filename) {
   }
 
   const names = rowFor('Name') || [];
-  if (rowFor('Excluded') && !rowFor('Allowed')) {
+  /* A test's levels can be written either way round. Both rows at once can
+     contradict each other, so the file is refused rather than guessed at -
+     the same rule the server applies. */
+  if (rowFor('Allowed') && rowFor('Excluded')) {
     throw new Error(
-      'That file has an "Excluded" row, which listed the levels that could ' +
-      'not take each test. It has been replaced by "Allowed", which lists ' +
-      'the levels that can. Rewrite the row the other way around and rename ' +
-      'it, so a file is never read as saying the opposite of what it says.');
+      'That file has both an "Allowed" row and an "Excluded" row. They say ' +
+      'the same thing from opposite sides and can contradict each other, so ' +
+      'keep whichever one you meant and delete the other.');
   }
-  const allowedRow = rowFor('Allowed') || [];
+  const barring = !rowFor('Allowed');
+  const levelRow = rowFor('Allowed') || rowFor('Excluded') || [];
+  const levelLabel = barring ? 'Excluded' : 'Allowed';
   const digits = state.limits ? state.limits.test_id_digits : 4;
   const levels = levelNames();
   const need = questionCount();
@@ -1099,21 +1162,38 @@ function readKeyCsv(text, filename) {
       const row = numbered.get(number);
       answers.push(((row && row[column]) || '').toUpperCase());
     }
-    const listed = (allowedRow[column] || '').split(',')
+    // Commas or semicolons, matching what the server accepts - a file it
+    // would read must not be refused here.
+    const listed = (levelRow[column] || '').split(/[,;]/)
       .map((item) => item.trim()).filter(Boolean);
     const positions = listed.map((name) => levels.findIndex(
       (level) => level.toUpperCase() === name.toUpperCase()));
     const stray = listed.filter((_, index) => positions[index] < 0);
     if (stray.length) {
       throw new Error(
-        '"' + stray[0] + '" in the Allowed row is not one of this sheet\u2019s ' +
-        'Latin levels (' + levels.join(', ') + '). Check the spelling, or ' +
-        'rename the level in step 2 first.');
+        '"' + stray[0] + '" in the ' + levelLabel + ' row is not one of this ' +
+        'sheet\u2019s Latin levels (' + levels.join(', ') + '). Check the ' +
+        'spelling, or rename the level in step 2 first.');
+    }
+    // Stored as the levels that may sit the test, however the file said it.
+    let allowed = null;
+    if (listed.length) {
+      allowed = barring
+        ? levels.map((_, index) => index).filter(
+            (index) => !positions.includes(index))
+        : positions;
+      if (!allowed.length) {
+        throw new Error(
+          'The Excluded row bars every Latin level from "' +
+          (names[column] || id) + '", so no student could sit it. Leave the ' +
+          'cell blank to bar nobody, or name only the levels that may not ' +
+          'sit it.');
+      }
     }
     loaded.push(Object.assign(newTest(), {
       name: names[column] || '',
       id: /^\d+$/.test(id) ? id.padStart(digits, '0') : id,
-      allowed: listed.length ? positions : null,
+      allowed: allowed,
       answers: answers,
     }));
   });
@@ -1184,14 +1264,35 @@ function thresholdSpec() {
 }
 
 /* One line for whatever has been changed away from the defaults. */
+/* What gets sent as annotate_students: '' for every paper, 'unknown' for the
+   ones whose Student ID could not be read, or the IDs themselves. */
+function annotateSpec() {
+  if (!state.annotate) return '';
+  if (state.annotateWho === 'unknown') return 'unknown';
+  if (state.annotateWho === 'list') return (state.annotateIds || '').trim();
+  return '';
+}
+
+function renderAnnotateWho() {
+  const box = $('annotate-who');
+  if (!box) return;
+  box.hidden = !state.annotate;
+  $('annotate-students').value = state.annotateWho || '';
+  $('annotate-list').hidden = state.annotateWho !== 'list';
+  $('annotate-ids').value = state.annotateIds || '';
+}
+
 function renderAdvancedHint() {
   const notes = [];
   const spec = thresholdSpec();
+  if (sidesSpec()) notes.push(sidesSpec() + ' only');
   if (testsSpec()) {
     notes.push(plural(gradedTests().length, 'test ', 'tests ') +
                gradedTests().join(' and ') + ' only');
   }
-  if (state.annotate) notes.push('mark-up on');
+  if (state.annotate) {
+    notes.push(state.annotateWho ? 'mark-up, some papers' : 'mark-up on');
+  }
   if (spec) notes.push('thresholds fixed');
   setStep('step-thresholds', true, 'hint-thresholds',
           notes.length ? notes.join(', ') : 'Defaults');
@@ -1240,6 +1341,94 @@ function sideOfTest(number) {
   return 'back';
 }
 
+/* Which sides of the paper the scans hold. null means both, which is what
+   an ordinary duplex scan is and what almost everybody wants. */
+function gradedSides() {
+  if (!Array.isArray(state.sides) || !state.sides.length) return [0, 1];
+  return state.sides.slice().sort((a, b) => a - b);
+}
+
+function sidesSpec() {
+  const kept = gradedSides();
+  return kept.length === 2 ? '' : (kept[0] === 0 ? 'front' : 'back');
+}
+
+/* The test numbers printed on one side of the sheet. */
+function testsOnSide(side) {
+  const perPage = (state.limits && state.limits.tests_on_page) || [1, 2];
+  const numbers = [];
+  let seen = 0;
+  perPage.forEach((count, page) => {
+    for (let index = 0; index < count; index++) {
+      seen += 1;
+      if (page === side) numbers.push(seen);
+    }
+  });
+  return numbers;
+}
+
+function renderWhichSides() {
+  const host = $('which-sides');
+  if (!host) return;
+  host.textContent = '';
+  const kept = gradedSides();
+  ['front', 'back'].forEach((name, side) => {
+    const box = el('input', { type: 'checkbox',
+                              checked: kept.includes(side) });
+    box.onchange = () => setSide(side, box.checked);
+    host.append(el('label', {}, [
+      box, name + ' (' + joinList(testsOnSide(side).map(
+        (number) => 'Test ' + number)) + ')']));
+  });
+
+  const note = $('sides-note');
+  const blanks = $('blanks-box');
+  const oneSided = kept.length === 1;
+  if (note) {
+    note.hidden = !oneSided;
+    if (oneSided) {
+      note.textContent =
+        'Only the ' + (kept[0] === 0 ? 'front' : 'back') + ' is being read, ' +
+        'so each page is graded on its own.' +
+        (kept[0] === 1
+          ? ' The Latin level is printed on the front, so a test with one key '
+            + 'per level cannot be scored from the back alone.'
+          : '');
+    }
+  }
+  if (blanks) {
+    blanks.hidden = !oneSided;
+    $('skip-blanks').checked = !!state.skipBlanks;
+  }
+  renderAdvancedHint();
+}
+
+/* Ticking a side brings its tests with it; unticking one takes them away.
+   The two settings cannot be allowed to contradict each other - grading a
+   test whose side was never scanned produces nothing and explains nothing. */
+function setSide(side, on) {
+  const kept = gradedSides();
+  const next = on ? kept.concat([side]) : kept.filter((item) => item !== side);
+  if (!next.length) {
+    say('msg-thresholds', 'bad',
+        'At least one side of the sheet has to be scanned.');
+    return renderWhichSides();
+  }
+  state.sides = next.length === 2 ? null : next.sort((a, b) => a - b);
+
+  const allowed = next.reduce(
+    (all, item) => all.concat(testsOnSide(item)), []);
+  const tests = gradedTests().filter((number) => allowed.includes(number));
+  state.onlyTests = tests.length === testsPerSheet() ? null : tests;
+  if (!tests.length) state.onlyTests = null;
+  if (!on) state.skipBlanks = state.skipBlanks && next.length === 1;
+
+  say('msg-thresholds', '', '');
+  save();
+  renderWhichSides();
+  renderWhichTests();
+}
+
 function renderWhichTests() {
   const host = $('which-tests');
   if (!host) return;
@@ -1248,21 +1437,29 @@ function renderWhichTests() {
   for (let number = 1; number <= testsPerSheet(); number++) {
     const box = el('input', { type: 'checkbox',
                               checked: kept.includes(number) });
+    const side = sideOfTest(number) === 'front' ? 0 : 1;
+    box.disabled = !gradedSides().includes(side);
     box.onchange = () => {
       const next = box.checked
         ? kept.concat([number]).sort((a, b) => a - b)
         : kept.filter((item) => item !== number);
       if (!next.length) {
         box.checked = true;
-        return say('msg-grade', 'bad',
+        return say('msg-thresholds', 'bad',
                    'At least one test has to be graded.');
       }
-      say('msg-grade', '', '');
+      say('msg-thresholds', '', '');
       state.onlyTests = next.length === testsPerSheet() ? null : next;
       save(); renderWhichTests(); renderAdvancedHint();
     };
-    host.append(el('label', {}, [box, 'Test ' + number + ' (' +
-                                      sideOfTest(number) + ')']));
+    const label = el('label', {}, [box, 'Test ' + number + ' (' +
+                                        sideOfTest(number) + ')']);
+    if (box.disabled) {
+      label.title = 'The ' + sideOfTest(number) + ' of the sheet is not in ' +
+                    'this scan.';
+      label.style.opacity = '.5';
+    }
+    host.append(label);
   }
 }
 
@@ -1358,6 +1555,9 @@ function batchCard(batch, index) {
     form.append('threshold', thresholdSpec());
     form.append('annotate', state.annotate ? 'true' : 'false');
     form.append('tests', testsSpec());
+    form.append('sides', sidesSpec());
+    form.append('skip_blanks', state.skipBlanks ? 'true' : 'false');
+    form.append('annotate_students', annotateSpec());
     if (state.sheet) form.append('layout', JSON.stringify(state.sheet));
 
     const started = performance.now();
@@ -1413,6 +1613,28 @@ function summaryView(batch) {
          'processing time'),
   ]));
 
+  if (summary.pages_set_aside) {
+    const counted = summary.pages || {};
+    const kinds = Object.keys(counted)
+      .filter((name) => name !== 'Graded' && name !== 'Blank')
+      .map((name) => counted[name] + ' ' + name.toLowerCase());
+    box.append(el('div', { className: 'msg warn' }, [
+      summary.pages_set_aside + ' ' +
+      plural(summary.pages_set_aside, 'page', 'pages') +
+      ' could not be graded (' + joinList(kinds) + '). Every page ' +
+      'of the batch and what became of it is listed in ',
+      el('code', { textContent: 'Pages.csv' }),
+      ' below. The rest of the batch was graded normally.',
+    ]));
+  }
+  if (summary.override_problems && summary.override_problems.length) {
+    box.append(el('div', { className: 'msg warn' }, [
+      plural(summary.override_problems.length, 'One correction', 'Some ' +
+             'corrections') + ' could not be matched to a test and ' +
+      plural(summary.override_problems.length, 'was', 'were') +
+      ' not applied:\n' + summary.override_problems.join('\n'),
+    ]));
+  }
   if (summary.test_not_found) {
     box.append(el('div', { className: 'msg warn' },
       [summary.test_not_found + ' ' +
@@ -1470,7 +1692,8 @@ function summaryView(batch) {
 function byUsefulness(files) {
   const rank = (item) => (/Results\.csv/.test(item.name) ? 0
                         : /Unclear|Missing/.test(item.name) ? 1
-                        : /Question Stats/.test(item.name) ? 2 : 3);
+                        : /Pages\.csv/.test(item.name) ? 2
+                        : /Question Stats/.test(item.name) ? 3 : 4);
   return files.slice().sort((a, b) => rank(a) - rank(b));
 }
 
@@ -1515,6 +1738,10 @@ function renderReview() {
 /* What this batch still needs a person for. A kind stops counting once a
    corrected file of that kind has been applied. */
 function outstanding(batch) {
+  if (batch.updated && batch.updated.leftOver) {
+    // Rows came back unticked, so there is still work on this batch.
+    return ['unclear'];
+  }
   const done = (batch.updated && batch.updated.kinds) || [];
   const kinds = [];
   if (batch.summary.unclear && !done.includes('unclear')) kinds.push('unclear');
@@ -1571,6 +1798,11 @@ function reviewCard(batch) {
                                     label: 'Choose corrections' });
   const go = el('button', { className: 'primary',
                             textContent: 'Apply and re-score' });
+  const ignore = el('input', { type: 'checkbox' });
+  const ignoreLabel = el('label', { className: 'inline' },
+                         [ignore, 'Ignore the Done column']);
+  ignoreLabel.title = 'Apply every row whether or not it is ticked. For ' +
+                      'when the work was done but the column was not.';
   const message = el('div', { className: 'msg' });
   const results = el('div');
 
@@ -1578,12 +1810,28 @@ function reviewCard(batch) {
     results.textContent = '';
     if (!batch.updated) return;
     const applied = batch.updated.applied;
+    const left = batch.updated.leftOver || 0;
+    const done = applied + ' ' +
+      plural(applied, 'correction', 'corrections') + ' applied, ' +
+      batch.updated.scored + ' rows re-scored.';
+    results.append(left
+      ? el('p', { className: 'msg warn', textContent:
+          done + ' ' + left + ' ' + plural(left, 'row', 'rows') +
+          ' had nothing ticked in the Done column, so ' +
+          plural(left, 'it was', 'they were') + ' left alone. ' +
+          'The shortened file below has just those rows — finish them and ' +
+          'upload it again.' })
+      : el('p', { className: 'msg ok', textContent:
+          'Success! No more marks are ' +
+          quotedPlain(batch.updated.kinds) + '. ' + done }));
+    if (batch.updated.problems && batch.updated.problems.length) {
+      results.append(el('p', { className: 'msg warn', textContent:
+        plural(batch.updated.problems.length, 'One correction',
+               'Some corrections') + ' could not be matched to a test and ' +
+        plural(batch.updated.problems.length, 'was', 'were') +
+        ' not applied:\n' + batch.updated.problems.join('\n') }));
+    }
     results.append(
-      el('p', { className: 'msg ok', textContent:
-        'Success! No more marks are ' +
-        quotedPlain(batch.updated.kinds) + '. ' +
-        applied + ' ' + plural(applied, 'correction', 'corrections') +
-        ' applied, ' + batch.updated.scored + ' rows re-scored.' }),
       el('p', { className: 'note', textContent:
         'These are the current results for batch ' + batch.n +
         '. The copies in step 6 are left as they were first graded.' }),
@@ -1618,6 +1866,7 @@ function reviewCard(batch) {
                   'Keys.csv');
     }
     if (state.sheet) form.append('layout', JSON.stringify(state.sheet));
+    form.append('require_done', ignore.checked ? 'false' : 'true');
 
     try {
       const body = await call('/regrade', { method: 'POST', body: form });
@@ -1640,6 +1889,8 @@ function reviewCard(batch) {
                             data: item.data })),
         applied: body.summary.corrections_applied,
         scored: body.summary.scored,
+        leftOver: body.summary.rows_left_over || 0,
+        problems: body.summary.override_problems || [],
         kinds: settled.length ? settled : ['unclear', 'missing'],
       };
       save();
@@ -1669,7 +1920,8 @@ function reviewCard(batch) {
   if (reviewFiles.length) card.append(fileList(reviewFiles));
   if (kinds || batch.updated) {
     card.append(
-      el('div', { className: 'row', style: 'margin-top:.6rem' }, [host, go]),
+      el('div', { className: 'row', style: 'margin-top:.6rem' },
+         [host, go, ignoreLabel]),
       message, results);
   }
   showResults();
@@ -1757,10 +2009,29 @@ function start() {
   });
 
   $('add-batch').onclick = addBatch;
+  renderWhichSides();
   renderWhichTests();
+  renderAnnotateWho();
   $('annotate').onchange = () => {
     state.annotate = $('annotate').checked;
+    save(); renderAnnotateWho(); renderAdvancedHint();
+  };
+  $('annotate-students').onchange = () => {
+    state.annotateWho = $('annotate-students').value;
+    save(); renderAnnotateWho(); renderAdvancedHint();
+  };
+  $('annotate-ids').oninput = () => {
+    state.annotateIds = $('annotate-ids').value;
+    save();
+  };
+  $('skip-blanks').onchange = () => {
+    state.skipBlanks = $('skip-blanks').checked;
     save(); renderAdvancedHint();
+  };
+
+  $('get-script').onclick = (event) => {
+    event.preventDefault();
+    downloadScript();
   };
 
   $('reset').onclick = () => {

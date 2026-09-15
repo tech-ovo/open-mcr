@@ -16,12 +16,22 @@ Anything the reader could not call confidently ends up in one of two CSVs:
 
 Both are written flat, one fact per column, so they can be uploaded straight
 to a Google Sheet, corrected by several people at once, downloaded, and fed
-back with ``--overrides``. Rows are matched on file, page and location, never
-on the Student ID, because a spreadsheet will silently turn ``04275`` into
-``4275``.
+back with ``--overrides``.
+
+A row is matched back to the test it came from by whichever of ``File``,
+``Page``, ``Test``, ``Test ID`` and ``Student ID`` it carries - as long as
+together they name exactly one test. The software fills in all of them, so its
+own rows always match; a row **added by hand** needs only enough to be
+unambiguous, which is normally the Student ID and the Test ID. That is how to
+correct a bubble that was read wrongly but never flagged as doubtful.
+
+``Test`` matters more than it looks. The back of the sheet carries two tests
+side by side, both numbering their questions from 1, so "page 2, question 5"
+names two different questions and correcting one used to rewrite the other.
 """
 
 import csv
+import dataclasses
 import pathlib
 import typing as tp
 
@@ -38,9 +48,10 @@ BATCH_SEPARATOR = " — "
 TRUE = "TRUE"
 FALSE = "FALSE"
 
-#: Columns before the per-option ones. `Location` is what the row is about:
+#: Columns before the per-option ones. `Question` is what the row is about:
 #: a question number, or the name of a field such as "Student ID digit 2".
-UNCLEAR_COLUMNS = ("Batch", "File", "Page", "Student ID", "Test ID",
+#: `Test` numbers the tests across the whole sheet, from 1.
+UNCLEAR_COLUMNS = ("Batch", "File", "Page", "Test", "Student ID", "Test ID",
                    "Question")
 #: The Missing sheet asks for a whole field, so it carries no Test ID column
 #: of its own - which test is meant is said in `Field`.
@@ -48,6 +59,10 @@ MISSING_COLUMNS = ("Batch", "File", "Page", "Student ID", "Field", "Value",
                    "Done")
 
 DONE_COLUMN = "Done"
+
+#: Columns any row may use to say which test it is about. None is required on
+#: its own; together they have to pick out exactly one.
+ADDRESS_COLUMNS = ("File", "Page", "Test", "Test ID", "Student ID")
 
 
 def unclear_header(options: str = layout.OPTIONS) -> tp.List[str]:
@@ -68,13 +83,18 @@ class UnclearRow(tp.NamedTuple):
     guess: tp.FrozenSet[str]
     """Options the reader would have picked, pre-ticked in the sheet."""
 
-    def key(self) -> tp.Tuple[str, int, str]:
-        return (self.source_file, self.page, self.location)
+    test_number: int = 0
+    """Which test on the sheet, counted from 1 across both sides. 0 for a row
+    about the sheet rather than a test, such as a Student ID digit."""
+
+    def key(self) -> tp.Tuple[str, int, int, str]:
+        return (self.source_file, self.page, self.test_number, self.location)
 
     def as_row(self, options: str = layout.OPTIONS) -> tp.List[str]:
         return [
-            self.batch, self.source_file, str(self.page), self.student_id,
-            self.test_id, self.location
+            self.batch, self.source_file, str(self.page),
+            str(self.test_number) if self.test_number else "",
+            self.student_id, self.test_id, self.location
         ] + [(TRUE if option in self.guess else FALSE) for option in options
              ] + [FALSE]
 
@@ -143,26 +163,75 @@ class NotFinishedError(ValueError):
     """A review sheet came back with rows nobody has ticked off."""
 
 
+@dataclasses.dataclass(frozen=True)
+class Address:
+    """Whichever of the identifying columns a row filled in.
+
+    Any subset will do, as long as together they pick out one test. The
+    software writes all of them; a person adding a row by hand usually writes
+    the Student ID and the Test ID and leaves the rest empty.
+    """
+
+    source_file: str = ""
+    page: tp.Optional[int] = None
+    test_number: tp.Optional[int] = None
+    test_id: str = ""
+    student_id: str = ""
+
+    @property
+    def is_empty(self) -> bool:
+        return not any((self.source_file, self.page, self.test_number,
+                        self.test_id, self.student_id))
+
+    def describe(self) -> str:
+        parts = []
+        if self.source_file:
+            parts.append(self.source_file)
+        if self.page is not None:
+            parts.append(f"page {self.page}")
+        if self.test_number is not None:
+            parts.append(f"test {self.test_number}")
+        if self.test_id:
+            parts.append(f"Test ID {self.test_id}")
+        if self.student_id:
+            parts.append(f"Student ID {self.student_id}")
+        return ", ".join(parts) or "no identifying columns"
+
+
+@dataclasses.dataclass(frozen=True)
+class AnswerCorrection:
+    """One question, settled by a person."""
+
+    where: Address
+    question: str
+    chosen: tp.FrozenSet[str]
+    origin: str
+    """Which file and line it came from, for anything that has to be said
+    about it afterwards."""
+
+
+@dataclasses.dataclass(frozen=True)
+class ValueCorrection:
+    """One whole field - a Student ID, a Latin level, a Test ID - typed in
+    again."""
+
+    where: Address
+    field: str
+    value: str
+    origin: str
+
+
 class Overrides(tp.NamedTuple):
-    """What a human decided, keyed by (file, page, location)."""
+    """Everything a person decided, still to be matched against the rows."""
 
-    answers: tp.Dict[tp.Tuple[str, int, str], tp.Set[str]]
-    """Corrected option letters for an unclear mark."""
-
-    values: tp.Dict[tp.Tuple[str, int, str], str]
-    """Corrected text for a missing field."""
+    answers: tp.List[AnswerCorrection]
+    values: tp.List[ValueCorrection]
+    unfinished: tp.List[str]
+    """Rows nobody ticked off, when they were allowed through anyway."""
 
     @property
     def count(self) -> int:
         return len(self.answers) + len(self.values)
-
-    def answer_for(self, source_file: str, page: int, location: str
-                   ) -> tp.Optional[tp.Set[str]]:
-        return self.answers.get((source_file, page, location))
-
-    def value_for(self, source_file: str, page: int, field: str
-                  ) -> tp.Optional[str]:
-        return self.values.get((source_file, page, field))
 
 
 class OverrideError(ValueError):
@@ -204,6 +273,35 @@ def collect(paths: tp.Sequence[pathlib.Path]) -> tp.List[pathlib.Path]:
     return found
 
 
+def _whole_number(text: str) -> tp.Optional[int]:
+    """Read a cell a spreadsheet may have turned into '2.0'."""
+    text = text.strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def _pages_in(text: str, origin: str) -> tp.List[tp.Optional[int]]:
+    """A Page cell, which may name several pages: "1,2"."""
+    text = text.strip()
+    if not text:
+        return [None]
+    pages: tp.List[tp.Optional[int]] = []
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        number = _whole_number(part)
+        if number is None:
+            raise OverrideError(
+                f"{origin}: page '{text}' is not a page number.")
+        pages.append(number)
+    return pages or [None]
+
+
 def load(paths: tp.Sequence[pathlib.Path],
          options: str = layout.OPTIONS,
          require_done: bool = True) -> Overrides:
@@ -213,20 +311,27 @@ def load(paths: tp.Sequence[pathlib.Path],
     be given in any order, and a file that has been through a spreadsheet
     (extra columns, reordered columns, changed number formats) still works.
 
-    Every row must have its `Done` box ticked. An unticked row means somebody
-    has not looked at it yet, and silently folding in the machine's own guess
-    would defeat the point of asking.
+    Rows are *not* resolved to particular tests here - that happens against
+    the results, in :func:`pipeline.apply_overrides`, because only there is it
+    known what tests exist.
+
+    Args:
+        require_done: refuse the file if any row is not ticked off. An
+            unticked row means nobody has looked at it, and folding in the
+            machine's own guess would defeat the point of asking. Turning this
+            off is for the case where somebody worked through every row and
+            forgot to tick them.
     """
-    answers: tp.Dict[tp.Tuple[str, int, str], tp.Set[str]] = {}
-    values: tp.Dict[tp.Tuple[str, int, str], str] = {}
+    answers: tp.List[AnswerCorrection] = []
+    values: tp.List[ValueCorrection] = []
     unfinished: tp.List[str] = []
 
     for path in collect(paths):
         header, rows = _read_rows(path)
         if not header:
             continue
-        lookup = {name.strip().lower(): index for index, name in
-                  enumerate(header)}
+        lookup = {name.strip().lower(): index
+                  for index, name in enumerate(header)}
 
         def cell(row: tp.List[str], name: str) -> str:
             index = lookup.get(name.lower())
@@ -243,58 +348,82 @@ def load(paths: tp.Sequence[pathlib.Path],
                 "columns Field and Value (the Missing sheet).")
 
         for line_number, row in enumerate(rows, start=2):
-            source_file = cell(row, "File")
-            page_text = cell(row, "Page")
-            if not source_file or not page_text:
-                continue
-            pages: tp.List[int] = []
-            for part in page_text.replace(";", ",").split(","):
-                part = part.strip()
-                if not part:
-                    continue
-                try:
-                    pages.append(int(float(part)))
-                except ValueError:
-                    raise OverrideError(
-                        f"'{path.name}' line {line_number}: page "
-                        f"'{page_text}' is not a page number.")
-            if not pages:
+            origin = f"{path.name} line {line_number}"
+            what = cell(row, "Question") or cell(row, "Field")
+            if not what:
                 continue
 
-            if require_done and "done" in lookup and \
-                    not _is_true(cell(row, DONE_COLUMN)):
-                what = cell(row, "Question") or cell(row, "Field") or "?"
+            if "done" in lookup and not _is_true(cell(row, DONE_COLUMN)):
                 unfinished.append(
-                    f"{path.name} line {line_number}: {source_file} page "
-                    f"{page_text}, {what}")
-                continue
-
-            if is_unclear:
-                location = cell(row, "Question")
-                if not location:
+                    f"{origin}: {cell(row, 'File') or 'this batch'}, {what}")
+                if require_done:
                     continue
-                chosen = {
-                    option
-                    for option in options if _is_true(cell(row, option))
-                }
-                for page in pages:
-                    answers[(source_file, page, location)] = chosen
-            else:
-                field = cell(row, "Field")
-                if not field:
-                    continue
-                for page in pages:
-                    values[(source_file, page, field)] = cell(row, "Value")
 
-    if unfinished:
+            base = dict(
+                source_file=cell(row, "File"),
+                test_number=_whole_number(cell(row, "Test")),
+                test_id=cell(row, "Test ID"),
+                student_id=cell(row, "Student ID"),
+            )
+            for page in _pages_in(cell(row, "Page"), origin):
+                where = Address(page=page, **base)
+                if where.is_empty:
+                    raise OverrideError(
+                        f"{origin}: this row says nothing about which test it "
+                        "belongs to. Fill in at least a Student ID and a Test "
+                        f"ID, or any of: {', '.join(ADDRESS_COLUMNS)}.")
+                if is_unclear:
+                    answers.append(AnswerCorrection(
+                        where=where,
+                        question=cell(row, "Question"),
+                        chosen=frozenset(option for option in options
+                                         if _is_true(cell(row, option))),
+                        origin=origin))
+                else:
+                    values.append(ValueCorrection(
+                        where=where,
+                        field=cell(row, "Field"),
+                        value=cell(row, "Value"),
+                        origin=origin))
+
+    # An unticked row is one nobody has looked at, and folding in the
+    # machine's own guess for it would defeat the point of asking - so it is
+    # left out and comes back next time. A sheet with *nothing* ticked is
+    # something else: almost always somebody who did the work and forgot the
+    # column, and quietly applying none of it would be its own trap.
+    if require_done and unfinished and not (answers or values):
         shown = unfinished[:10]
         more = len(unfinished) - len(shown)
         raise NotFinishedError(
-            f"{len(unfinished)} review row(s) have not been ticked off in the "
-            "Done column, so nobody has settled them yet:"
+            f"None of the {len(unfinished)} row(s) in that review sheet have "
+            "been ticked off in the Done column, so there is nothing to "
+            "apply:"
             + "".join(chr(10) + "  " + item for item in shown)
             + (chr(10) + f"  ... and {more} more" if more else "")
-            + chr(10) + "Tick Done on every row, or delete the rows you do "
-            "not want to change.")
+            + chr(10) + "Tick Done on the rows you have settled. If every row "
+            "really has been looked at, re-run with the Done column ignored."
+        )
 
-    return Overrides(answers=answers, values=values)
+    return Overrides(answers=answers, values=values, unfinished=unfinished)
+
+
+def outstanding(paths: tp.Sequence[pathlib.Path],
+                used_origins: tp.Set[str]
+                ) -> tp.List[tp.Tuple[str, tp.List[str], tp.List[tp.List[str]]]]:
+    """What is left of each uploaded review sheet once the used rows are gone.
+
+    Returned as ``(filename, header, rows)`` so the leftovers can be written
+    back out in the same shape they arrived in, extra spreadsheet columns and
+    all. That is what makes a second round of corrections the same gesture as
+    the first: whatever nobody settled comes back as a shorter file.
+    """
+    left: tp.List[tp.Tuple[str, tp.List[str], tp.List[tp.List[str]]]] = []
+    for path in collect(paths):
+        header, rows = _read_rows(path)
+        if not header:
+            continue
+        keep = [row for index, row in enumerate(rows, start=2)
+                if f"{path.name} line {index}" not in used_origins]
+        if keep:
+            left.append((path.name, header, keep))
+    return left

@@ -17,6 +17,7 @@ Deploy with::
 """
 
 import base64
+import csv
 import json
 import os
 import pathlib
@@ -100,6 +101,7 @@ def _collect_outputs(folder: pathlib.Path) -> tp.List[tp.Dict[str, tp.Any]]:
 
 def _summarise(result, thresholds_note: str) -> tp.Dict[str, tp.Any]:
     from src import answer_key as keys_module
+    from src import batching
 
     rows = result.rows
     scored = [row for row in rows if row.points is not None]
@@ -107,9 +109,19 @@ def _summarise(result, thresholds_note: str) -> tp.Dict[str, tp.Any]:
     for row in rows:
         if row.status:
             statuses[row.status] = statuses.get(row.status, 0) + 1
+    pages: tp.Dict[str, int] = {}
+    for report in getattr(result, "reports", ()):
+        pages[report.status] = pages.get(report.status, 0) + 1
     return {
         "sheets": len({(row.source_file, row.student_id) for row in rows}),
         "rows": len(rows),
+        # Every page that went in, and what became of it. The site shows the
+        # ones that were set aside; Pages.csv has the detail.
+        "pages": pages,
+        "pages_set_aside": sum(
+            count for status, count in pages.items()
+            if status in batching.SET_ASIDE),
+        "override_problems": list(getattr(result, "override_problems", ())),
         "scored": len(scored),
         "unclear": len(result.unclear),
         "missing": len(result.missing),
@@ -128,6 +140,50 @@ def _summarise(result, thresholds_note: str) -> tp.Dict[str, tp.Any]:
         "test_not_allowed": statuses.get(keys_module.TEST_NOT_ALLOWED, 0),
         "level_needed": statuses.get(keys_module.LEVEL_NEEDED, 0),
     }
+
+
+def _parse_sides(raw: str) -> tp.Tuple[int, ...]:
+    """Which sides of the paper a scan contains.
+
+    Accepts "front", "back", or both in either order. An empty value means
+    both, which is what an ordinary duplex scan is.
+    """
+    text = (raw or "").strip().lower()
+    if not text:
+        return (0, 1)
+    wanted = set()
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if part in ("0", "front"):
+            wanted.add(0)
+        elif part in ("1", "back"):
+            wanted.add(1)
+        elif part:
+            raise ValueError(
+                f"'{part}' is not a side of the sheet. Use 'front', 'back', "
+                "or both.")
+    if not wanted:
+        raise ValueError(
+            "At least one side of the sheet has to be included in the scan.")
+    return tuple(sorted(wanted))
+
+
+def _parse_students(raw: str):
+    """Which papers get a marked-up copy: all, the unreadable IDs, or a list."""
+    from src import annotation
+
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if text.lower() in ("unknown", "unreadable"):
+        return annotation.UNKNOWN_IDS
+    listed = tuple(part.strip() for part in text.replace(";", ",").split(",")
+                   if part.strip())
+    return listed or None
+
+
+def _truthy(raw: str) -> bool:
+    return (raw or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _write_upload(folder: pathlib.Path, name: str, data: bytes
@@ -279,10 +335,18 @@ def build_app():
                     batch: str = Form(""),
                     threshold: str = Form(""),
                     annotate: str = Form("false"),
+                    annotate_students: str = Form(""),
                     tests: str = Form(""),
+                    sides: str = Form(""),
+                    skip_blanks: str = Form("false"),
+                    require_done: str = Form("true"),
                     layout: str = Form("")):
         check(request)
         text = read_text_config(layout)
+        try:
+            wanted_sides = _parse_sides(sides)
+        except ValueError as error:
+            raise HTTPException(400, str(error))
 
         payloads = [await upload.read() for upload in scans]
         guard_size(payloads)
@@ -314,9 +378,13 @@ def build_app():
                 key_file=key_path,
                 override_files=tuple(override_paths),
                 threshold_spec=threshold or None,
-                annotate=annotate.lower() in ("1", "true", "yes", "on"),
+                annotate=_truthy(annotate),
+                annotate_students=_parse_students(annotate_students),
                 tests=pipeline.parse_tests(
                     tests, sheet_layout.TESTS_PER_SHEET),
+                sides=wanted_sides,
+                skip_blanks=_truthy(skip_blanks),
+                require_done=_truthy(require_done),
                 sheet_text=text)
 
             transcript = console_module.Console(enabled=False)
@@ -347,6 +415,7 @@ def build_app():
                       results: UploadFile,
                       key: tp.Optional[UploadFile] = None,
                       overrides: tp.Optional[tp.List[UploadFile]] = None,
+                      require_done: str = Form("true"),
                       layout: str = Form("")):
         check(request)
         text = read_text_config(layout)
@@ -363,9 +432,10 @@ def build_app():
 
             try:
                 rows = pipeline.read_results(results_path)
-                applied = 0
+                applied = None
                 if override_paths:
-                    corrections = review_module.load(override_paths)
+                    corrections = review_module.load(
+                        override_paths, require_done=_truthy(require_done))
                     applied = pipeline.apply_overrides(rows, corrections)
                 keys = None
                 if key is not None:
@@ -390,18 +460,38 @@ def build_app():
             pipeline.write_question_stats(output / pipeline.STATS_FILENAME,
                                           rows, keys, questions)
 
+            # Whatever nobody settled comes back as a shorter review sheet, so
+            # a second round is the same gesture as the first. Without this, a
+            # batch with any row left unticked had nowhere to go.
+            left_over = 0
+            if applied is not None:
+                for name, header, remaining in review_module.outstanding(
+                        override_paths, applied.origins):
+                    left_over += len(remaining)
+                    with open(output / name, "w", newline="",
+                              encoding="utf-8") as handle:
+                        writer = csv.writer(handle)
+                        writer.writerow(header)
+                        writer.writerows(remaining)
+
             statuses: tp.Dict[str, int] = {}
             for row in rows:
                 if row.status:
                     statuses[row.status] = statuses.get(row.status, 0) + 1
+            unclear_left = sum(
+                1 for row in rows if row.status == pipeline.STATUS_NEEDS_REVIEW)
             return {
                 "summary": {
                     "rows": len(rows),
                     "scored": len([r for r in rows if r.points is not None]),
-                    "corrections_applied": applied,
+                    "corrections_applied": (
+                        0 if applied is None else applied.changed),
+                    "override_problems": (
+                        [] if applied is None else applied.problems),
                     "statuses": statuses,
-                    "unclear": 0,
+                    "unclear": unclear_left,
                     "missing": 0,
+                    "rows_left_over": left_over,
                 },
                 "files": _collect_outputs(output),
             }

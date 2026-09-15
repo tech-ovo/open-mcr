@@ -1,0 +1,338 @@
+All of the wording on grade.uhsjcl.org, in the order it appears.
+
+Edit any line in place. Do not reorder or delete lines, and keep the
+{braces} where they are - each one is a number or name the page fills
+in as it runs. Lines that are only a fragment ("row has", "tests have")
+are pieces the page joins to the line beside them to make one sentence.
+
+======================================================================
+HEADER AND OVERVIEW
+======================================================================
+JCL Grading
+Free open-source exam grading for convention or classroom use: build the answer sheet, write the key, print and scan, grade, and fix unclear marks.
+How this works
+Connect to the grading server. You only do this once per browser.
+Design and print the answer sheet.
+List the tests that go on it.
+Enter the answer keys. This can wait until after the exam if you would rather.
+Advanced settings, which most people can skip.
+Scan the completed sheets and upload them here.
+Fix anything unclear, and download the results.
+Where data is stored: Your setup, answer keys, thresholds, and results are saved locally in this browser on this device. Uploaded scan PDFs are temporarily sent to the grading server for processing, then deleted; they are not retained on the server.
+
+======================================================================
+STEP 1 - Connect to the grading server
+======================================================================
+Server address
+The Modal endpoint, ending in .modal.run
+Passphrase
+Do not share publicly
+1 Connect to the grading server Not connected
+Ask whoever set the server up.
+Connect
+Copy an invite link
+An invite link fills these two boxes in for whoever opens it. The passphrase is inside the link — anyone who has it can grade, so send it the way you would send the passphrase itself, and not somewhere public. Step 2 has a second button that adds your sheet design to the link.
+https://yourname--jcl-grading-api.modal.run
+
+======================================================================
+STEP 2 - Design and print the answer sheet
+======================================================================
+Title across the top
+One line each
+Up to 12 lines, each at most 86 characters.
+2 Design and print the answer sheet Default wording
+You can change the wording and Latin levels. The bubbles and corner marks are fixed. Reprint after any change.
+Latin levels
+One bubble each, printed top to bottom in this order. A key refers to them by these names, so renaming one here renames it everywhere.
+Add a level
+Remove the last
+Write-in lines
+These are not read by the software — only the bubbles are. They exist in case the Student ID goes wrong.
+Directions
+Generate PDF
+Reset wording
+Copy a link with this design
+That link is the step 1 invite plus everything on this page. Anyone grading these sheets needs the same design, because the reader works from it — so send this one rather than the plain invite once you have changed anything here.
+Printing
+Print double-sided (your printer may call this duplex).
+Use 100% scale if possible. "Fit to page" is acceptable if your printer requires it, but it makes the bubbles smaller.
+Do not print two pages to a sheet.
+
+======================================================================
+STEP 3 - List the tests
+======================================================================
+3 List the tests No tests yet
+Test ID: the 4-digit number for this test. Print this number on the test booklet.
+Levels: who may take the test. Two tests may share a Test ID as long as the levels do not overlap.
+Test name
+Test ID
+Levels that may take it
+Add a test
+
+======================================================================
+STEP 4 - Enter the answers
+======================================================================
+4 Enter the answers No answers yet
+Enter the correct answer for questions 1–80 for each test.
+Pick one of the two options.
+A. Type or paste directly (easiest).
+B. Upload a spreadsheet.
+C. Edit the grid — you can also review or change answers here.
+A. Type or paste the answers
+One box per test. Separate the answers with spaces, commas or newlines, or paste one unbroken string like ABCDE….
+Tidy the answers
+Undo tidy
+B. Upload a spreadsheet
+Download the template, type the answers into the numbered rows in Excel or Google Sheets, then bring the file back.
+Download template
+Undo upload
+C. Review answers (optional)
+Every answer is editable here, however it got in. A cell you have typed into is shown in bold.
+What goes in a cell
+C
+The answer is C.
+ABD
+The answer is A, B and D. The student must fill all three.
+A|BD
+Either is accepted: A on its own, or B and D together.
+X
+Exclude this question from scoring. Use if you discover after the test that a question should not count.
+-
+You have not entered this answer yet (placeholder).
+X means the question is finished and will not be scored, while - just means you have not typed it in yet.
+Technical notes
+Case does not matter. abd and ABD are the same answer, and so are x and X.
+Order does not matter. BD and DB are the same answer.
+More than two alternatives are fine. A|B|CD accepts A, or B, or C and D together. There is no limit on how many you list.
+A repeated letter is an error. AA is rejected, as is a stray | such as A|, and any letter outside A–E.
+A and B can be mixed. They write to the same answers, and the grid shows whatever is there.
+Uploading merges, instead of replacing. A column whose Test ID matches a test you already have updates that test; anything else is added. Tests not mentioned in the file are left alone, and Undo upload puts everything back.
+The file is Keys.csv. The field names run down the first column (Name, Test ID, Excluded, then 1 to 80) with one further column per test.
+Excluded may be written as Allowed instead, naming the levels that may sit each test rather than the ones that may not. Use one row or the other, not both. Excluded is left blank by default, which bars nobody and stays right when you add or rename a Latin level later.
+Download Keys.csv
+
+======================================================================
+STEP 5 - Advanced
+======================================================================
+Which papers
+Marking up a whole convention makes a document nobody reads
+Student IDs
+Separated by commas
+Answer cutoff
+Answer review threshold
+ID cutoff
+ID review threshold
+5 Advanced Defaults
+Nothing here needs changing for an ordinary run. It is all remembered, and applies to every batch you grade from now on.
+Which tests to grade
+Every test on the sheet, unless you say otherwise. Untick one and its columns are not read at all: no results, no answer key needed, and nothing on the review sheets. Useful when a test is scored elsewhere, or when its key is not ready yet.
+Which sides were scanned
+Both, unless you say otherwise. Scanning one side only is for when a test is being re-marked on its own: the pages are then read one at a time instead of in front-and-back pairs, and a page of the other side is set aside rather than read. The front carries Test 1 and the back carries Tests 2 and 3, so a side you leave out takes its tests with it.
+Skip blank pages
+A duplex scanner produces an empty page for the back of a one-sided original, giving printed, blank, printed, blank. With this on those empty pages are passed over; with it off each one is reported as something that should not be there. Either way, a blank page turning up where a printed one should be is flagged, so a sheet that missed the feeder is not mistaken for one that was meant to be empty.
+Marked-up scans
+Mark-up scan
+Marked-up scans show which bubbles were read as filled, along with the correct answer. They make a run noticeably slower, so leave this off unless you are demoing or debugging.
+Every paper
+Only where the Student ID could not be read
+Only these Student IDs…
+Thresholds
+Every bubble is measured for darkness on a scale from 0 (blank paper) to 1 (solid black). A bubble darker than the cutoff counts as filled. One that lands between the review threshold and the cutoff is too close to call, so it is counted neither way and goes to step 7 for a person to decide. Anything fainter is ignored.
+Where those two lines fall depends on the scanner, the paper and how hard the students pressed, so the server measures them from each batch of scans rather than using fixed numbers.
+Override thresholds (not recommended)
+A higher number is stricter: it demands a darker mark. Leave a box empty to compute that one automatically — you can pin one number and let the other three be measured.
+After a run, Calibration.txt shows the computed thresholds, so you can copy those numbers here to repeat it.
+04275, 04276
+automatic
+
+======================================================================
+STEP 6 - Scan and grade
+======================================================================
+6 Scan and grade Nothing graded
+At the scanner: required
+Scan each sheet as two consecutive PDF pages: front first, back second. Do not scan all fronts first and all backs afterward. The run stops if the pages do not alternate, rather than grade the wrong back against the wrong front.
+Turn off blank page removal. It will quietly drop a lightly-marked page, and a page dropped there is a page nobody knows is missing. Blank pages are counted and reported here instead.
+Do not crop into the four corner marks. The reader finds the grid from them, so a tight auto-crop can make a page unreadable.
+At the scanner: recommended
+200–300 dpi. Color, grayscale or black and white all work; grayscale keeps the files small.
+Deskew and auto-rotate can be left on or off. The reader straightens the page itself and corrects one that comes through sideways or upside down, so neither setting will break a batch.
+Save one PDF per batch of about 25 sheets — your scanner can usually start a new file every 50 pages for you. This keeps each upload small enough for the server to handle; the hard limit is 40 MB. If a scan is too big, break it into smaller pieces and add each as its own batch.
+Grading
+A batch is one PDF from the scanner, holding whole sheets. Each is graded on its own and keeps its own results, so you can start grading the first stack while the rest is still being scanned.
+If a mark was read wrong or the key was wrong, fix it in step 7: that re-scores from the results already here, without re-reading the scans. If the paper itself needs re-reading, scan it again and add it as a new batch — a batch that has been graded stays as it was.
+Add a batch
+
+======================================================================
+STEP 7 - Fix unclear marks
+======================================================================
+7 Fix unclear marks Nothing to review
+Two kinds of thing reach this step. Unclear is a bubble too faint to call — the reader neither counts it nor ignores it, and asks instead. Missing is a required field it could not read at all. A question left blank is not an error: that is the student's choice.
+Each file asks for one correction per row. Open it, check the paper, fill in the answer, mark the row Done, and upload it below. The Done column has to read TRUE, which is what a ticked checkbox saves as; in a plain editor, type TRUE yourself. A row you have not ticked is left exactly as it was and comes back as a shorter file to finish next time, so you can do half now and half later.
+Correcting something that was never flagged
+You can add rows as well as fill them in. A student whose answer was read confidently but wrongly — a stray mark read as an answer, say — never reaches these files, and a row you write by hand is how to fix it.
+A row needs enough of File, Page, Test, Test ID and Student ID to pick out exactly one test. The Student ID and the Test ID normally do it. Then the question number and the answer:
+Student ID
+Question
+A
+B
+D
+E
+Done
+04275
+1002
+17
+FALSE
+TRUE
+That says: on student 04275’s test 1002, question 17 is B. Leave every option FALSE to record that the student answered nothing. If a row names no test, or names more than one, it is reported back rather than guessed at.
+In Google Sheets, CAJCL → Add a correction row sets one up with the checkboxes already in place.
+Google Sheets is optional
+Any editor that saves CSV will do — Excel, Numbers, even a text editor. Nothing here needs Google Sheets.
+Sheets is worth setting up when several people are correcting at once. Everyone opens the same file and works through different rows at the same time, and you download it once at the end. The script below is a convenience on top of that — it adds checkboxes so nobody has to type TRUE, restores the leading zeros on Student IDs that a spreadsheet would otherwise eat, fits the columns, and trims the blank rows.
+Create a Google Sheet shared with whoever is helping.
+Extensions → Apps Script, paste in Sheet.gs, and Save. It carries the Latin levels from step 2, so the dropdown it adds matches the sheet you printed.
+Click the Triggers (clock) icon → Add Trigger.
+source — From spreadsheet
+type — On change
+Save and accept the prompt.
+For each file: File → Import → Insert new sheet(s). It has to create a new sheet — "Replace current sheet" will not trigger the script.
+When the sheet is finished, File → Download → Comma-separated values.
+Source code and the command-line version. Licensed under the GPL v3, with no warranty.
+Reset
+
+======================================================================
+MESSAGES AND LABELS GENERATED BY THE PAGE
+======================================================================
+This browser will not store any more results. Download what you have, then use Reset at the foot of the page to clear the saved work.
+, {word}
+unclear or missing
+Connect to the server first (step 1).
+Could not reach the server. Check the address, and check you are online.
+The server did not accept that passphrase.
+The server returned {response.status}.
+Choose file
+no file uploaded
+var LATIN_LEVELS = [{listed}];
+Could not fetch Sheet.gs ({error.message}). Reload the page and try again.
+Connect in step 1 first, then copy the link.
+Link copied, carrying the server details and this sheet design.
+Invite link copied.
+It contains the passphrase, so send it privately.
+This browser would not let the page use the clipboard. Copy the link by hand:
+Enter the server address.
+Not connected
+Connect in step 1 and the sheet’s wording appears here.
+Custom wording
+Default wording
+of {max} levels. Removing one also removes it from any test that was restricted to it.
+lines. Only the first {MAX_DIRECTIONS} will be printed.
+of {MAX_DIRECTIONS} lines
+Building the PDF…
+Answer Sheet.pdf
+Downloaded. Print it double-sided, flipping on the long edge, at 100% scale.
+Latin Literature
+At least one level has to be able to take each test.
+Remove this test
+question {number} is outside 1\u2013
+could not read "{leftover.slice(0, 24)}"
+no numbered answers found
+Untitled test
+Add a test in step 3 first.
+of {need} answers —
+of {need} answers
+Rewritten as the page reads them. A dash marks a question with no answer yet.
+Add a test in step 3 and its answers will appear here.
+has a stray "|" — write alternatives as A|BD, with a letter on each side of it
+contains "{letter}", which is not one of
+repeats a letter in "{alternative}"
+lists the same answer twice
+, question {(index + 1)} {problem}.
+Every test needs a Test ID.
+No tests yet
+Loaded {state.keySource.count}
+manually overwritten
+of {withId.length}
+test has
+tests have
+a full set of {need} answers.
+ready, {need} answers each.
+Check the answers
+of {withId.length} complete
+No answers yet
+There is no "Test ID" row in {filename}. The field names run down the first column: Name, Test ID, Excluded, then 1 to {questionCount()}.
+The "Test ID" row in {filename} is empty, so there is no test to load. Put each test's ID in that row, one per column.
+That file has both an "Allowed" row and an "Excluded" row. They say the same thing from opposite sides and can contradict each other, so keep whichever one you meant and delete the other.
+"{stray[0]}" in the {levelLabel} row is not one of this sheet’s Latin levels (
+). Check the spelling, or rename the level in step 2 first.
+The Excluded row bars every Latin level from "{(names[column] || id)}", so no student could sit it. Leave the cell blank to bar nobody, or name only the levels that may not sit it.
+already here
+not in that file, and
+left alone.
+Upload undone.
+mark-up, some papers
+mark-up on
+thresholds fixed
+Test {number))})
+Only the
+is being read, so each page is graded on its own.
+The Latin level is printed on the front, so a test with one key per level cannot be scored from the back alone.
+At least one side of the sheet has to be scanned.
+At least one test has to be graded.
+Test {number} ({sideOfTest(number)})
+The {sideOfTest(number)} of the sheet is not in this scan.
+No batches yet.
+of {state.batches.length} graded
+Nothing graded
+Remove batch {batch.n} and its saved results? Anything not downloaded is lost.
+Choose scan
+Grade this batch
+Choose the scanned PDF for this batch first.
+That is {(total / 1048576).toFixed(0)} MB, over the {Math.round(limit / 1048576)} MB limit. Split it at the scanner into smaller batches and add each one here.
+Uploading and grading {(total / 1048576).toFixed(1)} MB. This takes a few seconds per page.
+processing time
+could not be graded ({joinList(kinds)}). Every page of the batch and what became of it is listed in
+below. The rest of the batch was graded normally.
+One correction
+Some corrections
+could not be matched to a test and
+row has
+rows have
+a Test ID that is not in the key. Check the key, or correct the Test ID in step 7.
+a Test ID with one key per Latin level, and the level itself could not be read. Fill it in on the Missing sheet in step 7 and re-score.
+row is
+rows are
+for a test that student’s Latin level may not take.
+graded in this batch.
+A marked-up scan was
+Marked-up scans were
+sent to this browser’s downloads folder (
+They are
+too large to keep on this page, so that download is the only copy — everything else listed above stays here and can be downloaded again.
+Grade a batch first.
+Nothing to review
+to fix
+All clear
+Could not read
+Choose corrections
+Apply and re-score
+Ignore the Done column
+Apply every row whether or not it is ticked. For when the work was done but the column was not.
+applied, {batch.updated.scored} rows re-scored.
+had nothing ticked in the Done column, so
+it was
+they were
+left alone. The shortened file below has just those rows — finish them and upload it again.
+Success! No more marks are {quotedPlain(batch.updated.kinds)}.
+These are the current results for batch {batch.n}. The copies in step 6 are left as they were first graded.
+Choose the corrected CSV files first.
+This batch has no saved results to re-score.
+Re-scoring. The scans are not needed for this.
+unclear, {batch.summary.missing} missing. Download these, correct them, then bring them back.
+Already settled. The corrected files are below; upload more to re-score again.
+Nothing was left unclear or missing in this batch.
+Connect first.
+Back to the standard wording.
+Add at least one test in step 3 first, so the template has a column to fill in.
+Template downloaded. Fill in the numbered rows, save it as CSV, then bring it back here.
+Add at least one test with a Test ID.
+Upload Keys.csv
+Clear the tests, answers, thresholds and every graded batch saved in this browser? This cannot be undone.

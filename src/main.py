@@ -41,8 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
                              "named after it so several batches can be told\n"
                              "apart once downloaded.")
     parser.add_argument("--key", type=parse_path_arg, metavar="FILE.csv",
-                        help="The answer key CSV: one row per test, with\n"
-                             "columns Name, Test ID, Excluded, then 1 to 80.\n"
+                        help="The answer key CSV: field names down the first\n"
+                             "column - Name, Test ID, Excluded (or Allowed),\n"
+                             "then 1 to 80 - and one column per test.\n"
                              "Without it the sheets are read but not scored.")
     parser.add_argument("--overrides", type=parse_path_arg, nargs="+",
                         default=(), metavar="FILE.csv",
@@ -63,6 +64,26 @@ def build_parser() -> argparse.ArgumentParser:
                              "line to copy.")
     parser.add_argument("--annotate", action="store_true",
                         help="Also write a marked-up copy of every scan.")
+    parser.add_argument("--annotate-students", metavar="WHO",
+                        help="Narrow --annotate to the papers worth looking\n"
+                             "at: 'unknown' for the ones whose Student ID\n"
+                             "could not be read in full, or a list of\n"
+                             "Student IDs. Defaults to all of them.")
+    parser.add_argument("--sides", metavar="SIDE[,SIDE]", default="",
+                        help="Which sides of the sheet this scan contains:\n"
+                             "'front', 'back', or both. A one-sided scan is\n"
+                             "read a page at a time instead of in pairs, and\n"
+                             "only the tests printed on that side are\n"
+                             "graded. Defaults to both.")
+    parser.add_argument("--skip-blanks", action="store_true",
+                        help="Ignore pages with nothing on them, which is\n"
+                             "what a duplex scanner produces for the empty\n"
+                             "reverse of a one-sided original. Blank pages\n"
+                             "are listed in Pages.csv either way.")
+    parser.add_argument("--ignore-done", action="store_true",
+                        help="Accept a corrected review sheet whose Done\n"
+                             "column was never ticked. Only for the case\n"
+                             "where every row really was looked at.")
     parser.add_argument("--tests", metavar="N[,N...]",
                         help="Grade only these tests, numbered from 1 across\n"
                              "the sheet: '--tests 2' grades the second test\n"
@@ -75,6 +96,42 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-d", "--debug", action="store_true",
                         help="Re-raise unexpected errors with a traceback.")
     return parser
+
+
+def _parse_sides(raw: str) -> tuple:
+    """Read --sides into the page positions a scan contains."""
+    text = (raw or "").strip().lower()
+    if not text:
+        return (0, 1)
+    wanted = set()
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if part in ("0", "front"):
+            wanted.add(0)
+        elif part in ("1", "back"):
+            wanted.add(1)
+        elif part:
+            raise pipeline.BreakingError(
+                f"'{part}' is not a side of the sheet. Use 'front', 'back', "
+                "or both.")
+    if not wanted:
+        raise pipeline.BreakingError(
+            "At least one side of the sheet has to be included in the scan.")
+    return tuple(sorted(wanted))
+
+
+def _parse_students(raw):
+    """Read --annotate-students into a filter for the marked-up copies."""
+    from . import annotation
+
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if text.lower() in ("unknown", "unreadable"):
+        return annotation.UNKNOWN_IDS
+    listed = tuple(part.strip() for part in text.replace(";", ",").split(",")
+                   if part.strip())
+    return listed or None
 
 
 def _make_output_encoding_safe():
@@ -92,12 +149,15 @@ def _regrade(args, console: console_module.Console) -> int:
                  f"'{args.regrade.name}'.")
 
     if args.overrides:
-        overrides = review_module.load(list(args.overrides))
+        overrides = review_module.load(list(args.overrides),
+                                       require_done=not args.ignore_done)
         applied = pipeline.apply_overrides(rows, overrides)
         console.line(
-            f"Applied {console_module.plural(applied, 'correction')} from "
+            f"Applied "
+            f"{console_module.plural(applied.changed, 'correction')} from "
             f"{console_module.quoted_list([p.name for p in args.overrides])}.",
             indent=1)
+        _report_override_problems(applied.problems, console)
 
     keys = answer_key.load(args.key) if args.key else None
     pipeline.score_rows(rows, keys)
@@ -119,6 +179,44 @@ def _regrade(args, console: console_module.Console) -> int:
     return 0
 
 
+def _report_override_problems(problems, console: console_module.Console):
+    """Corrections that named no test, or more than one.
+
+    Worth saying out loud: the row was typed by somebody who meant it, and
+    quietly dropping it would lose a decision a person had already made.
+    """
+    if not problems:
+        return
+    console.line(
+        f"{console_module.plural(len(problems), 'correction')} could not be "
+        "matched to a test and "
+        f"{console_module.verb(len(problems), 'was', 'were')} not applied:")
+    for problem in problems[:10]:
+        console.line(problem, indent=1)
+    if len(problems) > 10:
+        console.line(f"... and {len(problems) - 10} more", indent=1)
+
+
+def _report_pages(result: pipeline.RunResult,
+                  console: console_module.Console, output: pathlib.Path):
+    """What became of the pages that were not graded."""
+    from . import batching
+
+    set_aside = [report for report in result.reports
+                 if report.status in batching.SET_ASIDE]
+    if not set_aside:
+        return
+    console.line(
+        f"{console_module.plural(len(set_aside), 'page')} "
+        f"{console_module.verb(len(set_aside), 'was', 'were')} not graded. "
+        f"Every page is listed in '{pipeline.PAGES_FILENAME}'.")
+    for report in set_aside[:10]:
+        console.line(f"{report.label}: {report.status.lower()} - "
+                     f"{report.note}", indent=1)
+    if len(set_aside) > 10:
+        console.line(f"... and {len(set_aside) - 10} more", indent=1)
+
+
 def _report(result: pipeline.RunResult, options: pipeline.RunOptions,
             console: console_module.Console, output: pathlib.Path,
             scored: bool):
@@ -132,6 +230,8 @@ def _report(result: pipeline.RunResult, options: pipeline.RunOptions,
             f"{output / th.CALIBRATION_FILENAME}.", indent=1)
 
     console.line(f"All exams processed and saved to {output}.")
+    _report_pages(result, console, output)
+    _report_override_problems(result.override_problems, console)
     if result.annotated:
         console.line(
             f"{console_module.plural(len(result.annotated), 'marked-up PDF')} "
@@ -202,9 +302,14 @@ def main(argv: list) -> int:
                                       override_files=tuple(args.overrides),
                                       threshold_spec=args.threshold,
                                       annotate=args.annotate,
+                                      annotate_students=_parse_students(
+                                          args.annotate_students),
                                       tests=pipeline.parse_tests(
                                           args.tests,
                                           layout.TESTS_PER_SHEET),
+                                      sides=_parse_sides(args.sides),
+                                      skip_blanks=args.skip_blanks,
+                                      require_done=not args.ignore_done,
                                       debug=args.debug)
         result = pipeline.run(options, console)
         output = pipeline.resolve_batch_folder(args.output_folder, args.batch)

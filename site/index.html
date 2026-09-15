@@ -79,9 +79,13 @@
     display: grid; place-items: center; font: 600 .85rem var(--sans);
     background: var(--line-soft); color: var(--ink-soft);
   }
-  .step[data-state="done"] .num { background: var(--good-soft); color: var(--good); }
-  .step[data-state="done"] .num::after { content: "\2713"; }
-  .step[data-state="done"] .num > span { display: none; }
+  /* A finished step goes green but keeps its number. Swapping the number
+     for a tick left nothing to refer to, and these steps are referred to by
+     number constantly - "fix it in step 7". */
+  .step[data-state="done"] .num {
+    background: var(--good-soft); color: var(--good);
+    box-shadow: inset 0 0 0 1px var(--good);
+  }
   .title { font: 600 1.02rem var(--sans); flex: 1; }
   .hint { color: var(--ink-faint); font-size: .85rem; text-align: right; }
   .body { padding: 1.1rem 1.15rem 1.15rem; }
@@ -111,6 +115,8 @@
                      font-weight: 400; margin-bottom: .3rem; }
   label.inline { display: inline-flex; align-items: center; gap: .45rem;
                  margin: 0; font-size: .92rem; cursor: pointer; }
+  /* A checkbox belongs with the sentence explaining it, but not touching it. */
+  label.inline + p, label.inline + .note { margin-top: .45rem; }
   input[type=text], input[type=password], input[type=number], textarea, select {
     width: 100%; padding: .45rem .55rem; font: inherit; color: var(--ink);
     background: var(--paper); border: 1px solid var(--line);
@@ -167,7 +173,10 @@
   th { font-size: .76rem; text-transform: uppercase; letter-spacing: .05em;
        color: var(--ink-faint); font-weight: 600; }
   td input[type=text] { padding: .25rem .4rem; }
-  .scroll { overflow-x: auto; }
+  /* Scrolled blocks are block-level like a paragraph, so they need a
+     paragraph's air under them; without it the next line sat flush. */
+  .scroll { overflow-x: auto; margin-bottom: .85rem; }
+  .scroll:last-child, .scroll > :last-child { margin-bottom: 0; }
   code, .mono { font-family: var(--mono); font-size: .88em; }
 
   .chips { display: flex; flex-wrap: wrap; gap: .35rem; }
@@ -223,12 +232,15 @@
   .files { list-style: none; padding: 0; margin: .5rem 0 0; }
   .files li { display: flex; gap: .5rem; align-items: center; padding: .3rem 0;
               border-bottom: 1px solid var(--line-soft); font-size: .88rem;
-              min-height: 2.1rem; }
+              min-height: 2.1rem; margin-bottom: 0; }
   .files li button { flex: 0 0 auto; }
   .files li:last-child { border-bottom: 0; }
   .files .name { flex: 1; font-family: var(--mono); font-size: .85rem; }
   .files .tag { margin-left: .5rem; font-family: var(--sans);
                 font-size: .78rem; color: var(--good); }
+  /* The note that ends a batch - where the marked-up scans went - sat on
+     its own bottom margin as well as the card's padding. */
+  .batch p:last-child, .batch .files:last-child { margin-bottom: 0; }
   .stat { display: inline-block; margin: 0 1.1rem .3rem 0; font-size: .88rem;
           color: var(--ink-soft); }
   .stat b { display: block; font: 700 1.25rem var(--sans); color: var(--ink); }
@@ -531,15 +543,25 @@
             anything else is added. Tests not mentioned in the file are left
             alone, and <strong>Undo upload</strong> puts everything back.</li>
           <li><strong>The file is <code>Keys.csv</code>.</strong> The field
-            names run down the first column (Name, Test ID, Allowed, then 1 to
+            names run down the first column (Name, Test ID, Excluded, then 1 to
             <span class="q-count">80</span>) with one further column per
             test.</li>
+          <li><strong><code>Excluded</code> may be written as
+            <code>Allowed</code> instead</strong>, naming the levels that
+            <em>may</em> sit each test rather than the ones that may not. Use
+            one row or the other, not both. <code>Excluded</code> is left blank
+            by default, which bars nobody and stays right when you add or
+            rename a Latin level later.</li>
         </ul>
       </div>
     </details>
 
     <div class="row" id="download-key-row" style="margin-top:.9rem">
       <button class="primary" id="download-key" hidden>Download Keys.csv</button>
+      <span class="note" id="download-key-note" hidden>Optional. The answers
+        are already saved in this browser and are sent with every batch you
+        grade. Download a copy to keep it, or to carry it to another
+        browser.</span>
     </div>
     <div class="msg" id="msg-key"></div>
   </div>
@@ -565,6 +587,29 @@
     </p>
     <div class="chips" id="which-tests"></div>
 
+    <h3>Which sides were scanned</h3>
+    <p class="note">
+      Both, unless you say otherwise. Scanning one side only is for when a
+      test is being re-marked on its own: the pages are then read one at a
+      time instead of in front-and-back pairs, and a page of the other side is
+      set aside rather than read. The front carries Test 1 and the back
+      carries Tests 2 and 3, so a side you leave out takes its tests with it.
+    </p>
+    <div class="chips" id="which-sides"></div>
+    <p class="note" id="sides-note" hidden></p>
+    <div id="blanks-box" hidden style="margin-top:.7rem">
+      <label class="inline"><input type="checkbox" id="skip-blanks">
+        Skip blank pages</label>
+      <p class="note">
+        A duplex scanner produces an empty page for the back of a one-sided
+        original, giving printed, blank, printed, blank. With this on those
+        empty pages are passed over; with it off each one is reported as
+        something that should not be there. Either way, a blank page turning
+        up where a printed one should be is flagged, so a sheet that missed
+        the feeder is not mistaken for one that was meant to be empty.
+      </p>
+    </div>
+
     <h3>Marked-up scans</h3>
     <label class="inline"><input type="checkbox" id="annotate"> Mark-up scan</label>
     <p class="note">
@@ -572,6 +617,20 @@
       correct answer. They make a run noticeably slower, so leave this off
       unless you are demoing or debugging.
     </p>
+    <div id="annotate-who" hidden>
+      <label><span class="lab">Which papers</span>
+        <span class="sub">Marking up a whole convention makes a document
+          nobody reads</span>
+        <select id="annotate-students">
+          <option value="">Every paper</option>
+          <option value="unknown">Only where the Student ID could not be read</option>
+          <option value="list">Only these Student IDs…</option>
+        </select></label>
+      <label id="annotate-list" hidden><span class="lab">Student IDs</span>
+        <span class="sub">Separated by commas</span>
+        <input type="text" id="annotate-ids" placeholder="04275, 04276"
+               autocomplete="off" spellcheck="false"></label>
+    </div>
 
     <h3>Thresholds</h3>
     <p class="note">
@@ -625,7 +684,9 @@
         afterward. The run stops if the pages do not alternate, rather than
         grade the wrong back against the wrong front.</li>
       <li><strong>Turn off blank page removal.</strong> It will quietly drop a
-        lightly-marked page and throw the whole batch out of order.</li>
+        lightly-marked page, and a page dropped there is a page nobody
+        knows is missing. Blank pages are counted and reported here
+        instead.</li>
       <li><strong>Do not crop into the four corner marks.</strong> The reader
         finds the grid from them, so a tight auto-crop can make a page
         unreadable.</li>
@@ -682,11 +743,50 @@
     <p class="note">
       Each file asks for one correction per row. Open it, check the paper, fill
       in the answer, mark the row <strong>Done</strong>, and upload it below.
-      Every row needs it: the <code>Done</code> column has to read
-      <code>TRUE</code>, which is what a ticked checkbox saves as. In a plain
-      editor, type <code>TRUE</code> yourself. A row left blank means nobody
-      has looked at it, and the upload is refused.
+      The <code>Done</code> column has to read <code>TRUE</code>, which is what
+      a ticked checkbox saves as; in a plain editor, type <code>TRUE</code>
+      yourself. A row you have not ticked is left exactly as it was and comes
+      back as a shorter file to finish next time, so you can do half now and
+      half later.
     </p>
+
+    <details class="tech">
+      <summary>Correcting something that was never flagged</summary>
+      <div class="body">
+        <p class="note">
+          You can <strong>add</strong> rows as well as fill them in. A student
+          whose answer was read confidently but wrongly &mdash; a stray mark
+          read as an answer, say &mdash; never reaches these files, and a row
+          you write by hand is how to fix it.
+        </p>
+        <p class="note">
+          A row needs enough of <code>File</code>, <code>Page</code>,
+          <code>Test</code>, <code>Test ID</code> and <code>Student ID</code>
+          to pick out exactly one test. The Student ID and the Test ID
+          normally do it. Then the question number and the answer:
+        </p>
+        <div class="scroll">
+          <table class="cells">
+            <tr><th>Student ID</th><th>Test ID</th><th>Question</th>
+              <th>A</th><th>B</th><th>C</th><th>D</th><th>E</th>
+              <th>Done</th></tr>
+            <tr><td>04275</td><td>1002</td><td>17</td>
+              <td>FALSE</td><td>TRUE</td><td>FALSE</td><td>FALSE</td>
+              <td>FALSE</td><td>TRUE</td></tr>
+          </table>
+        </div>
+        <p class="note">
+          That says: on student 04275&rsquo;s test 1002, question 17 is B.
+          Leave every option <code>FALSE</code> to record that the student
+          answered nothing. If a row names no test, or names more than one, it
+          is reported back rather than guessed at.
+        </p>
+        <p class="note">
+          In Google Sheets, <strong>CAJCL &rarr; Add a correction row</strong>
+          sets one up with the checkboxes already in place.
+        </p>
+      </div>
+    </details>
 
     <h3>Google Sheets is optional</h3>
     <p class="note">
@@ -705,7 +805,9 @@
     <ol class="note">
       <li>Create a Google Sheet shared with whoever is helping.</li>
       <li><strong>Extensions → Apps Script</strong>, paste in
-        <a href="Sheet.gs" download>Sheet.gs</a>, and Save.</li>
+        <a href="Sheet.gs" id="get-script" download>Sheet.gs</a>, and
+        Save. It carries the Latin levels from step 2, so the dropdown it adds
+        matches the sheet you printed.</li>
       <li>Click the <strong>Triggers</strong> (clock) icon →
         <strong>Add Trigger</strong>.
         <ul>

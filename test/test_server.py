@@ -368,7 +368,7 @@ def test_regrade_refuses_unticked_review_rows(client, tmp_path):
                ("overrides", ("Unclear.csv", names[unclear]["data"].encode(),
                               "text/csv"))])
     assert response.status_code == 422
-    assert "not been ticked" in response.json()["error"]
+    assert "have been ticked" in response.json()["error"]
 
 
 def test_regrade_applies_a_ticked_correction(client, tmp_path):

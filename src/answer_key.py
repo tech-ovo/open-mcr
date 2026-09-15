@@ -41,14 +41,23 @@ from . import sheet_layout as layout
 
 NAME_ROW = "Name"
 TEST_ID_ROW = "Test ID"
-ALLOWED_ROW = "Allowed"
-REQUIRED_ROWS = (NAME_ROW, TEST_ID_ROW, ALLOWED_ROW)
 
-#: The row this replaced. Meeting one means reading a file written for the old
-#: rules, where the levels listed were the ones that could *not* take the test.
-#: Loading it as though it said the opposite would silently score the wrong
-#: students, so it is refused instead.
-RETIRED_EXCLUDED_ROW = "Excluded"
+#: Which Latin levels may sit a test can be said either way round, and a file
+#: uses whichever row it carries.
+#:
+#: ``Excluded`` is the default the template writes, because its useful value is
+#: blank: a test nobody is barred from stays correct when a level is added or
+#: removed later. ``Allowed`` says the same thing from the other side and is
+#: the better row when a test is meant for a named few.
+#:
+#: A file carrying both is refused rather than guessed at - the two can
+#: contradict each other, and reading the wrong one scores the wrong students.
+ALLOWED_ROW = "Allowed"
+EXCLUDED_ROW = "Excluded"
+LEVEL_ROWS = (ALLOWED_ROW, EXCLUDED_ROW)
+
+#: What the template writes, and what the error messages name.
+REQUIRED_ROWS = (NAME_ROW, TEST_ID_ROW, EXCLUDED_ROW)
 
 #: Separates alternative acceptable answers within one cell.
 ALTERNATIVE_SEPARATOR = "|"
@@ -151,8 +160,14 @@ def _parse_answer_cell(cell: str, where: str
     return tuple(accepted)
 
 
-def _parse_allowed(cell: str, where: str,
-                   levels_in_use: tp.Sequence[str]) -> tp.FrozenSet[str]:
+def _parse_levels(cell: str, where: str, levels_in_use: tp.Sequence[str],
+                  row_label: str) -> tp.FrozenSet[str]:
+    """Resolve one column's level cell to the set that *may* take the test.
+
+    Both rows are read into the same answer, so nothing downstream has to know
+    which way round the file said it. A blank cell means no restriction either
+    way: nobody is allowed-listed, and nobody is barred.
+    """
     known = {level.upper() for level in levels_in_use}
     levels = {
         part.strip().upper()
@@ -163,8 +178,16 @@ def _parse_allowed(cell: str, where: str,
     unknown = levels - known
     if unknown:
         raise AnswerKeyError(
-            f"{where}: '{', '.join(sorted(unknown))}' is not a Latin level. "
-            f"Use one of {', '.join(levels_in_use)}.")
+            f"{where}: '{', '.join(sorted(unknown))}' in the {row_label} row "
+            f"is not a Latin level. Use one of {', '.join(levels_in_use)}.")
+    if row_label == EXCLUDED_ROW:
+        remaining = known - levels
+        if not remaining:
+            raise AnswerKeyError(
+                f"{where}: the {EXCLUDED_ROW} row bars every Latin level, so "
+                "no student could sit this test. Leave the cell blank to bar "
+                "nobody, or name only the levels that may not sit it.")
+        return frozenset(remaining)
     return frozenset(levels)
 
 
@@ -260,19 +283,23 @@ def load(path: pathlib.Path,
                 "Each row label must appear once.")
         rows[label] = [cell.strip() for cell in row[1:]]
 
-    if RETIRED_EXCLUDED_ROW in rows and ALLOWED_ROW not in rows:
+    present = [name for name in LEVEL_ROWS if name in rows]
+    if len(present) == 2:
         raise AnswerKeyError(
-            f"The key file has an '{RETIRED_EXCLUDED_ROW}' row. That row was "
-            f"replaced by '{ALLOWED_ROW}', which lists the levels that *may* "
-            "take each test rather than the ones that may not. Rewrite the "
-            "row with the opposite meaning and rename it, so that a file is "
-            "never read as saying the reverse of what it says.")
+            f"The key file has both an '{ALLOWED_ROW}' row and an "
+            f"'{EXCLUDED_ROW}' row. They say the same thing from opposite "
+            "sides and can contradict each other, so keep whichever one you "
+            "meant and delete the other.")
+    level_row = present[0] if present else None
 
-    missing = [name for name in REQUIRED_ROWS if name not in rows]
-    if missing:
+    missing = [name for name in (NAME_ROW, TEST_ID_ROW) if name not in rows]
+    if missing or level_row is None:
+        wanted = list(missing)
+        if level_row is None:
+            wanted.append(f"{ALLOWED_ROW}' or an '{EXCLUDED_ROW}")
         raise AnswerKeyError(
             f"The key file has no "
-            f"{', '.join(repr(name) for name in missing)} row. Its first "
+            f"{', '.join(repr(name) for name in wanted)} row. Its first "
             f"column must read: {', '.join(REQUIRED_ROWS)}, 1, 2, ... "
             f"{questions}.")
     for number in range(1, questions + 1):
@@ -310,8 +337,8 @@ def load(path: pathlib.Path,
                 f"{where}: Test ID '{test_id}' has {len(test_id)} digits, but "
                 f"the sheet has room for {layout.TEST_ID_DIGITS}.")
         test_id = test_id.zfill(layout.TEST_ID_DIGITS)
-        allowed = _parse_allowed(cell(ALLOWED_ROW, column), where,
-                                 levels_in_use)
+        allowed = _parse_levels(cell(level_row, column), where,
+                                levels_in_use, level_row)
 
         # Sharing a Test ID is allowed, but only while the keys cannot both
         # apply to one student.
@@ -347,11 +374,14 @@ def write_template(path: pathlib.Path,
                    questions: int = layout.QUESTIONS_PER_TEST) -> pathlib.Path:
     """Write a blank key file for staff to fill in."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    # The level row is written blank on purpose: a test nobody is barred
+    # from stays correct when a Latin level is added or renamed later, which
+    # an explicit list would not.
     examples = [
         (NAME_ROW, ["Latin Literature", "Reading Comprehension 1",
                     "Mythology"]),
         (TEST_ID_ROW, ["1001", "1002", "1003"]),
-        (ALLOWED_ROW, ["", "MS-1, MS-2, MS-3", ""]),
+        (EXCLUDED_ROW, ["", "", ""]),
     ]
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)

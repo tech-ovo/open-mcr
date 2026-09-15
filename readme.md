@@ -41,14 +41,21 @@ answer sheet.
 | **Directions on the sheet** | Printed on the front page. |
 | **Front/back markers** | A machine-readable page-code bubble and a solid collation bar along the bottom - left on the front, right on the back. |
 | **Batch folders** | `--batch 3` reads `<input>/Batch 3` and writes `<output>/Batch 3`, and names the review sheets after the batch. |
-| **Batch splitting** | Scan ten students as one twenty-page PDF; it is split into ten sheets automatically, and mis-collated pages stop the run. |
+| **Batch splitting** | Scan ten students as one twenty-page PDF and it is split into ten sheets automatically, matched on the printed page-code mark and the Student ID rather than on where a page happens to sit. |
+| **One bad page costs one paper** | A page whose corner marks are unreadable, or that has no partner, or whose two sides disagree about whose paper they are, is set aside on its own. Everything around it is still graded. |
+| **A page report** | `Pages.csv` lists every page that went in and what became of it — graded, blank, unreadable, unpaired, ID mismatch, wrong side — so "did every paper come back?" has an answer without anyone having to notice a warning. |
+| **Damaged corner marks** | If the marks cannot be recognised, the page is thresholded darker and tried again (printed marks survive a cutoff that drops graphite), and failing that the marks are found by position alone. A mark scribbled over, or filled in solid, still reads. |
+| **One-sided scans** | `--sides front` grades a stack of front pages a page at a time instead of in pairs, and `--skip-blanks` passes over the empty reverses a duplex scanner produces for them. |
 | **Calibrated thresholds** | The filled/blank cutoff is measured from the scans themselves, once per PDF, so a different scanner needs no retuning. Printed to `Calibration.txt` and overridable with `--threshold`. |
 | **A plain cutoff, so `AB` is readable** | A bubble is filled when it is dark enough - never "the darkest of the five" - so a student who means A *and* B is read as `AB`. |
-| **Answer keys as a CSV** | One row per field, one column per test: a Test ID, the Latin levels allowed to take it, and 80 answers. Two tests may share an ID when their levels do not overlap. |
+| **Answer keys as a CSV** | One row per field, one column per test: a Test ID, the Latin levels that may or may not take it, and 80 answers. Two tests may share an ID when their levels do not overlap. |
+| **`Excluded` or `Allowed`** | Say which levels may sit a test, or which may not — whichever reads better. The template ships `Excluded` blank, which bars nobody and stays right when a level is added or renamed later. |
 | **Review as a spreadsheet** | Anything too faint to call goes to `Unclear.csv` with a checkbox per option; anything required but blank goes to `Missing.csv`. Correct them in Google Sheets and feed them back. |
+| **Corrections you write yourself** | Add a row to `Unclear.csv` to fix a bubble that was read confidently but wrongly. Enough of `File`, `Page`, `Test`, `Test ID` and `Student ID` to name one test is all it needs; a row that names none, or several, is reported rather than guessed at. |
+| **More than one round** | Rows you have not ticked off are left exactly as they were and come back as a shorter sheet, so a review can be done in several sittings. `--ignore-done` is there for the day somebody works through every row and forgets the column. |
 | **Regrade without rescanning** | `--regrade` re-scores an existing `Results.csv` against a corrected key or corrected review sheets. |
 | **Question statistics** | `Question Stats.csv` gives per-question counts and percent correct. |
-| **Marked-up PDFs** | `--annotate` rings every bubble the reader acted on, answers and metadata alike. |
+| **Marked-up PDFs** | `--annotate` rings every bubble the reader acted on, answers and metadata alike. `--annotate-students unknown` narrows it to the papers whose Student ID did not come through, which is a job somebody can actually finish. |
 | **Grade some tests, not all** | `--tests 2` reads the second test on the sheet and ignores the rest - no results, no key needed, nothing on the review sheets. |
 | **A website, for everyone else** | The same pipeline behind a hosted endpoint, driven by a one-page site that walks an operator through all seven steps. Nothing is stored on the server. |
 
@@ -128,8 +135,16 @@ Allowed,,"MS-1, MS-2, MS-3","HS-1, HS-2, HS-3, HS-Adv"
 |---|---|
 | `Name` | What the test is called, for the reports. Free text. |
 | `Test ID` | The 4-digit number students bubble. |
-| `Allowed` | Latin levels that may take this test, comma-separated. Blank means every level. |
+| `Excluded` | Latin levels that may **not** take this test, comma-separated. Blank bars nobody. |
+| `Allowed` | The same thing said the other way round: the levels that **may**. Blank means every level. |
 | `1` ... `80` | The correct answer to each question. |
+
+Use `Excluded` **or** `Allowed`, not both — a file carrying both is refused,
+because the two can contradict each other and reading the wrong one scores the
+wrong students. The template writes `Excluded` blank, because that is the row
+whose *useful* value is empty: a test nobody is barred from stays correct when
+a Latin level is added or renamed later, where a written-out `Allowed` list
+would quietly start excluding the new one.
 
 ### One test, two keys
 
@@ -139,8 +154,8 @@ different key for, say, the middle school and high school entries: the Latin
 level the student bubbled decides which key they are scored against.
 
 The levels have to be disjoint, so that every student matches exactly one key —
-two columns that both accept HS-1, or a column with a blank `Allowed` beside
-any other column with the same ID, stop the run. If a Test ID has several keys
+two columns that both accept HS-1, or a column that bars nobody beside any
+other column with the same ID, stop the run. If a Test ID has several keys
 and a student's Latin level cannot be read, that row is marked `LATIN LEVEL NEEDED` rather than guessed at; filling the level in on the Missing sheet and
 re-scoring resolves it.
 
@@ -313,11 +328,13 @@ scan all the fronts first and all the backs afterwards.
 
 **Required:**
 
-- **Page order.** Every front must be followed by its own back. The run stops
-  if the pages do not alternate, rather than grade the wrong back against the
-  wrong front.
-- **Blank page removal off.** It will silently drop a lightly-marked page and
-  throw the whole batch out of order.
+- **Page order.** Every front must be followed by its own back. A sheet whose
+  pages do not pair up is set aside and named in `Pages.csv` rather than
+  graded against the wrong front — but the sheets around it are still graded,
+  so one mis-fed sheet costs one paper.
+- **Blank page removal off.** It will silently drop a lightly-marked page, and
+  a page dropped at the scanner is a page nobody knows is missing. Blank pages
+  are counted and reported here instead.
 - **Do not crop into the corner marks.** The reader recovers the grid from
   them, so an aggressive auto-crop can make a page unreadable.
 
@@ -366,9 +383,13 @@ the output files, not printed. Only a **breaking** problem — one that means no
 output should be produced at all — interrupts, and then nothing is written:
 
 - the key file has two tests with the same Test ID, or a bad answer letter;
-- the batch is not a clean run of front/back pairs;
-- a page's corner marks could not be found at all;
+- **not one sheet** in the batch could be read;
 - `--threshold` could not be understood.
+
+Everything else is a problem with one page, and costs that page alone. A page
+whose corner marks cannot be found, or that has no partner, or whose two sides
+give different Student IDs, is set aside and named in `Pages.csv`; the rest of
+the batch is graded as usual.
 
 ### Step 5 — Read the results
 
@@ -376,18 +397,37 @@ output should be produced at all — interrupts, and then nothing is written:
 
 **`Results.csv`** — three rows per student, one per test:
 
-| Batch | File | Page | Student ID | Latin Level | Test ID | Test Name | Status | Points | Out Of | Score (%) | 1 | 2 | … |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | batch.pdf | 1 | 04275 | HS-2 | 1001 | Latin Literature | | 78 | 80 | 97.50 | A | B | … |
-| 1 | batch.pdf | 2 | 04275 | HS-2 | 1002 | Reading Comp 1 | TEST NOT ALLOWED | | | | D | AB | … |
+| Batch | File | Page | Test | Student ID | Latin Level | Test ID | Test Name | Status | Points | Out Of | Score (%) | 1 | 2 | … |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | batch.pdf | 1 | 1 | 04275 | HS-2 | 1001 | Latin Literature | | 78 | 80 | 97.50 | A | B | … |
+| 1 | batch.pdf | 2 | 2 | 04275 | HS-2 | 1002 | Reading Comp 1 | TEST NOT ALLOWED | | | | D | AB | … |
 
 - An answer cell holds the letters the student filled — `AB` if they filled
   two, empty if they filled none.
 - A `?` inside a Student ID or Test ID marks a digit column that could not be
   read. It is deliberately not guessed at, because `0427` would look like a
   valid but wrong ID.
-- `Status` is blank when all is well, or `NEEDS REVIEW`, `TEST NOT FOUND`, or
-  `TEST NOT ALLOWED`.
+- `Test` numbers the tests across the whole sheet, from 1. It is what tells
+  the two tests on the back page apart: both number their questions from 1, so
+  "page 2, question 5" on its own names two different questions.
+- `Status` is blank when all is well, or `NEEDS REVIEW`, `TEST NOT FOUND`,
+  `TEST NOT ALLOWED`, or `LATIN LEVEL NEEDED`.
+
+**`Pages.csv`** — every page that went into the batch and what became of it:
+
+| Batch | File | Page | Side | Student ID | Test IDs | Sheet | Paired With | Status | Note |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | batch.pdf | 1 | front | 04275 | 1001 | 1 | page 2 | Graded | |
+| 1 | batch.pdf | 2 | back | 04275 | 1002 1003 | 1 | page 1 | Graded | |
+| 1 | batch.pdf | 3 | back | 04280 | | | | Unpaired | A back page with no front page before it… |
+
+`Status` is one of **Graded**, **Blank** (skipped, as expected on a one-sided
+scan), **Unexpected blank**, **Unreadable** (the corner marks could not be
+found), **Unpaired**, **ID mismatch**, or **Wrong side**. Anything but *Graded*
+and *Blank* carries a `Note` saying what to do about it.
+
+This file is written on good days too. "Did every paper I put in come out
+again?" should be answerable by counting, not by having noticed a warning.
 
 **`Question Stats.csv`** — per question: how many answered it, how many left
 it blank, how many chose each option, and the percent correct.
@@ -426,8 +466,8 @@ Two things go to review, and only two:
 option, with the machine's reading pre-ticked:
 
 ```csv
-Batch,File,Page,Student ID,Test ID,Question,A,B,C,D,E,Done
-1,batch.pdf,3,00031,1001,7,FALSE,TRUE,FALSE,FALSE,FALSE,FALSE
+Batch,File,Page,Test,Student ID,Test ID,Question,A,B,C,D,E,Done
+1,batch.pdf,3,1,00031,1001,7,FALSE,TRUE,FALSE,FALSE,FALSE,FALSE
 ```
 
 `Batch 1 — Missing.csv` asks for a whole field, not one bubble. Type the
@@ -441,9 +481,38 @@ Batch,File,Page,Student ID,Field,Value,Done
 1,batch.pdf,2,04275,Test 3 ID,,FALSE
 ```
 
-**Every row must have `Done` ticked** before it is accepted. An unticked row
-means nobody has looked at it, and quietly folding in the machine's own guess
-would defeat the point of asking — so the run stops and names the rows.
+**A row is used only once `Done` is ticked.** An unticked row means nobody has
+looked at it, and quietly folding in the machine's own guess would defeat the
+point of asking — so it is left exactly as it was and handed back as a shorter
+sheet to finish next time. A review can be done in several sittings, or by
+several people, without anything being lost in between.
+
+A sheet with **nothing at all** ticked is refused rather than silently doing
+nothing: that is almost always somebody who did the work and missed the
+column. `--ignore-done` is there for exactly that day.
+
+#### Correcting something that was never flagged
+
+A bubble read *confidently* but wrongly — a stray pencil mark taken for an
+answer — never reaches these files. Add a row to `Unclear.csv` yourself:
+
+```csv
+Batch,File,Page,Test,Student ID,Test ID,Question,A,B,C,D,E,Done
+,,,,04275,1002,17,FALSE,TRUE,FALSE,FALSE,FALSE,TRUE
+```
+
+That says: on student 04275's test 1002, question 17 is B. A row needs enough
+of `File`, `Page`, `Test`, `Test ID` and `Student ID` to pick out exactly one
+test, and no more — the Student ID and the Test ID usually do it. Leave every
+option `FALSE` to record that the student answered nothing.
+
+Leading zeros a spreadsheet has eaten are put back before matching, and a `?`
+in an ID matches any digit, so a row copied out of Excel still lands. A row
+that matches no test, or several, is reported by file and line rather than
+guessed at or dropped.
+
+In Google Sheets, **CAJCL → Add a correction row** sets one up with the
+checkboxes already in place.
 
 #### Working on it in Google Sheets
 
@@ -569,12 +638,17 @@ python -m src.main --key-template <Keys.csv>
 | `--regrade Results.csv` | Re-score an existing results file without touching the scans. |
 | `--threshold SPEC` | Use these cutoffs instead of calibrating. Four numbers, two, one, blanks for "calibrate this one", or names such as `answer=0.42`. |
 | `--annotate` | Also write marked-up copies of every scan. |
+| `--annotate-students WHO` | Narrow `--annotate` to `unknown` (the papers whose Student ID could not be read in full) or to a list of Student IDs. |
 | `--tests N[,N...]` | Grade only these tests, numbered from 1 across the sheet. Default: all of them. |
+| `--sides front\|back` | The scan holds only one side of the sheet. Pages are then read one at a time rather than in pairs, and only that side's tests are graded. Default: both. |
+| `--skip-blanks` | Pass over pages with nothing on them — the empty reverses a duplex scanner produces for a one-sided original. They are listed in `Pages.csv` either way. |
+| `--ignore-done` | Accept a corrected review sheet whose `Done` column was never ticked. |
 | `--key-template FILE.csv` | Write a blank answer key and exit. |
 | `-d`, `--debug` | Re-raise unexpected errors with a traceback. |
 
-Exit status is `0` when the run finished (whether or not marks need review)
-and `1` for a breaking problem, in which case nothing was written.
+Exit status is `0` when the run finished (whether or not marks need review, and
+whether or not some pages were set aside) and `1` for a breaking problem, in
+which case nothing was written.
 
 ---
 
@@ -670,9 +744,9 @@ domain.
 | **2. Design and print the answer sheet** | The title, the directions, the write-in labels, and the Latin levels — rename them, or add and remove them between 2 and 10. Generates the printable PDF. Wording only: the grid never moves, so a sheet printed from the site reads exactly like one printed from the command line. |
 | **3. List the tests** | A row per test — name, Test ID, and which Latin levels may take it. Test IDs are zero-padded to four digits when you leave the box, and two tests may share an ID when their levels do not overlap. |
 | **4. Enter the answers** | Three ways into the same data, and you can mix them: download the template and fill it in a spreadsheet, paste a whole test's answers at once, or type into the grid of every question. A paste may be numbered and out of order — `1. B  5. B  9. C` straight out of a PDF works, each answer going where its number says — and anything unreadable is named rather than dropped. `Keys.csv` is offered back whenever it holds work that is not already in a file you have. Uploading merges by Test ID rather than replacing, and there is an Undo. |
-| **5. Advanced** | The per-run choices, all of them optional: which tests to grade, whether to produce marked-up scans, and the thresholds (automatic per batch; tick the override to pin the four numbers, individually or together, exactly as `--threshold` does). The step summary says what has been changed away from the defaults. |
-| **6. Scan and grade** | The scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. |
-| **7. Fix unclear marks** | One card per graded batch: its `Unclear.csv` and `Missing.csv`, the upload that feeds corrections back and re-scores without the scans, and the optional Apps Script for people who would rather work in Google Sheets. The re-scored files stay **here**, tagged `(updated)`, and the batch in step 6 is left exactly as it was first graded — so there is one place to look for the latest results and one place to look for what the scans originally said. Files a re-score does not regenerate, such as `Calibration.txt`, are carried through rather than dropped. An uploaded `Keys.csv` is recognised and used as the key instead of as a sheet of corrections. |
+| **5. Advanced** | The per-run choices, all of them optional: which tests to grade, which sides of the sheet the scans hold (with the blank-page option that goes with a one-sided scan), whether to produce marked-up scans and for which papers, and the thresholds (automatic per batch; tick the override to pin the four numbers, individually or together, exactly as `--threshold` does). The two "which" settings are kept consistent with each other: a test whose side is not in the scan cannot be ticked. The step summary says what has been changed away from the defaults. |
+| **6. Scan and grade** | The scanner settings, then one card per batch. Batches are independent, so a second one can be added at any time and the first one's results stay put. A graded batch becomes read-only: it is the record of a run that happened, against the key and thresholds of the moment. Any pages that could not be graded are counted on the card and detailed in `Pages.csv`. |
+| **7. Fix unclear marks** | One card per graded batch: its `Unclear.csv` and `Missing.csv`, the upload that feeds corrections back and re-scores without the scans, and the optional Apps Script for people who would rather work in Google Sheets. The re-scored files stay **here**, tagged `(updated)`, and the batch in step 6 is left exactly as it was first graded — so there is one place to look for the latest results and one place to look for what the scans originally said. Files a re-score does not regenerate, such as `Calibration.txt`, are carried through rather than dropped. An uploaded `Keys.csv` is recognised and used as the key instead of as a sheet of corrections. Rows you have not ticked off come back as a shorter file, so a review can be finished in several sittings, and there is a checkbox for the day somebody does the work and forgets the column. |
 
 ### Batch size
 

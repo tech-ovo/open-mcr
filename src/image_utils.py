@@ -272,6 +272,60 @@ def threshold(image: np.ndarray,
     return result
 
 
+#: Where to re-threshold a page whose corner marks could not be found, as
+#: fractions of the way from the darkest pixel on the page up to Otsu's own
+#: cutoff. The marks are printed solid black, so they survive a cutoff that
+#: drops graphite; anything lying across one usually does not.
+DARKER_CUTOFFS = (0.55, 0.3, 0.12)
+
+
+#: Below this fraction of ink, a page is taken to have nothing on it. A
+#: printed answer sheet runs from about 4% to 9% even with nothing filled in,
+#: and a blank page with scanner noise and a speck of dirt on it stays under
+#: 0.01%, so anywhere in between separates them with room to spare.
+BLANK_INK_FRACTION = 0.005
+
+#: Gray level at or below which a pixel counts as ink for that test. Set well
+#: above black so that a faint scan of a real page still reads as printed.
+INK_LEVEL = 200
+
+
+def ink_fraction(image: np.ndarray) -> float:
+    """How much of the page is ink, from 0 (spotless) to 1 (solid)."""
+    gray = image if image.ndim == 2 else convert_to_grayscale(image)
+    return float((gray < INK_LEVEL).mean())
+
+
+def is_blank(image: np.ndarray) -> bool:
+    """Is there nothing on this page at all?
+
+    The empty reverse of a single-sided original, as a duplex scanner hands it
+    over. Distinguishing it from a printed page needs no cleverness: a page
+    carrying the sheet's grid has hundreds of times more ink on it.
+    """
+    return ink_fraction(image) < BLANK_INK_FRACTION
+
+
+def darker_renderings(image: np.ndarray
+                      ) -> tp.Iterator[np.ndarray]:
+    """Yield the page thresholded progressively closer to its darkest ink.
+
+    A generator, and called lazily: this costs real time and almost every
+    page finds its corners on the first, ordinary rendering.
+    """
+    gray = convert_to_grayscale(remove_hf_noise(image))
+    otsu, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+    # The darkest one percent of the page, rather than its single darkest
+    # pixel, so one speck of dust does not set the scale.
+    darkest = float(np.percentile(gray, 1))
+    if otsu <= darkest:
+        return
+    for fraction in DARKER_CUTOFFS:
+        cutoff = darkest + fraction * (otsu - darkest)
+        _, result = cv2.threshold(gray, cutoff, 255, cv2.THRESH_BINARY)
+        yield result
+
+
 def prepare_scan_for_processing(image: np.ndarray,
                                 save_path: tp.Optional[pathlib.PurePath] = None
                                 ) -> np.ndarray:

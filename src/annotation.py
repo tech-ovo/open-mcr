@@ -163,11 +163,47 @@ def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
     return annotated
 
 
+#: Passed as ``only_students`` to mark up just the papers whose Student ID
+#: could not be read in full.
+UNKNOWN_IDS = "unknown"
+
+
+def _normalise_id(student: str) -> str:
+    return (student or "").strip().lstrip("0") or "0"
+
+
+def wants_student(student: tp.Optional[str], only_students) -> bool:
+    """Should this paper get a marked-up copy?
+
+    ``only_students`` is None for all of them, :data:`UNKNOWN_IDS` for the
+    ones whose Student ID has a digit the reader could not call, or a
+    collection of IDs. Leading zeros are ignored on the way in, since a
+    spreadsheet will have eaten them.
+    """
+    if only_students is None:
+        return True
+    if not student:
+        # Nothing was read here at all, which is exactly the case somebody
+        # asking for the unreadable ones wants to see.
+        return only_students == UNKNOWN_IDS
+    if only_students == UNKNOWN_IDS:
+        return "?" in student
+    wanted = {_normalise_id(item) for item in only_students}
+    return _normalise_id(student) in wanted
+
+
 def write_marked_up(image_paths, scans_by_page, sheets, rows,
                     thresholds_by_file, keys, output_folder: pathlib.Path,
-                    console, only_tests=None) -> tp.List[pathlib.Path]:
+                    console, only_tests=None, only_students=None
+                    ) -> tp.List[pathlib.Path]:
     """One marked-up PDF per input file. Pages are re-read from the source and
-    spooled to disk, so a large batch stays within bounded memory."""
+    spooled to disk, so a large batch stays within bounded memory.
+
+    ``only_students`` narrows it to the papers worth looking at - see
+    :func:`wants_student`. Marking up a whole convention takes real time and
+    produces a document nobody reads; marking up the nine papers whose
+    Student ID did not come through is a job somebody can actually do.
+    """
     from PIL import Image
 
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -189,10 +225,18 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
     tests_before: tp.Dict[tp.Tuple[pathlib.Path, int], int] = {}
     for sheet in sheets:
         seen = 0
+        # Whole sheets are kept or dropped together: a front page without its
+        # back is not much use to the person checking it.
+        wanted = any(
+            wants_student(id_for_page.get((page.path.name,
+                                           page.page_index + 1)),
+                          only_students)
+            for page in sheet.pages)
         for page in sheet.pages:
-            pages_by_file.setdefault(page.path, []).append(page)
-            tests_before[(page.path, page.page_index)] = seen
             scan = scans_by_page.get((page.path, page.page_index))
+            if wanted:
+                pages_by_file.setdefault(page.path, []).append(page)
+                tests_before[(page.path, page.page_index)] = seen
             seen += len(scan.tests) if scan is not None else 0
 
     written: tp.List[pathlib.Path] = []

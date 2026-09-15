@@ -176,7 +176,7 @@ DEFAULT_DIRECTIONS: tp.Tuple[str, ...] = (
     "4.  Print your name and school on the lines above, then bubble your Latin level.",
     "5.  Bubble your Student ID on both sides of this sheet.",
     "6.  Copy the 4-digit Test ID printed on each booklet for each test.",
-    "7.  Do not fold or crease this sheet.",
+    "7.  Do not fold or crease this sheet or make any stray marks.",
 )
 
 DEFAULT_WRITE_IN_LABELS: tp.Tuple[str, ...] = ("First Name", "Last Name",

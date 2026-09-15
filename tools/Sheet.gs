@@ -13,6 +13,12 @@
  * complete Student ID, not a single digit. Page may read "1,2" when the same
  * field could not be read on either side of a sheet.
  *
+ * You can also ADD rows, to correct a bubble that was read wrongly but never
+ * flagged as doubtful. A row needs enough of File, Page, Test, Test ID and
+ * Student ID to pick out exactly one test - normally the Student ID and the
+ * Test ID - plus the question number and the answer. CAJCL > Add a correction
+ * row sets one up with the checkboxes already in place.
+ *
  * Written for the file layout this software produces. If you change the
  * review columns in src/review.py, change OPTION_COLUMNS below to match.
  */
@@ -20,10 +26,22 @@
 /** Option columns on the Unclear sheet, which become checkboxes. */
 var OPTION_COLUMNS = ['A', 'B', 'C', 'D', 'E'];
 
-/** Columns that must stay text, or Sheets eats their leading zeros. */
+/**
+ * Columns that must stay text, or Sheets eats their leading zeros.
+ *
+ * 'Test' is deliberately not one of them: it is a plain count of the tests on
+ * the sheet (1, 2, 3) and has no leading zero to lose.
+ */
 var TEXT_COLUMNS = ['Batch', 'Student ID', 'Test ID', 'Page'];
 
-/** The Latin levels, offered as a dropdown when a level is missing. */
+/**
+ * The Latin levels, offered as a dropdown when a level is missing.
+ *
+ * Downloading this file from the grading site fills in the levels your sheet
+ * was actually printed with. Editing the line by hand is fine too - it only
+ * has to match the names on the answer sheet.
+ */
+/* LATIN_LEVELS */
 var LATIN_LEVELS = ['MS-1', 'MS-2', 'MS-3', 'HS-1', 'HS-2', 'HS-3', 'HS-Adv'];
 
 /** Width in pixels for a checkbox column. */
@@ -51,6 +69,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
       .createMenu('CAJCL')
       .addItem('Tidy this review sheet', 'tidyActiveSheet')
+      .addItem('Add a correction row', 'addCorrectionRow')
       .addToUi();
 }
 
@@ -135,9 +154,12 @@ function formatReviewSheet(sheet) {
     var fieldColumn = index['Field'];
     var valueColumn = index['Value'];
     var fields = sheet.getRange(2, fieldColumn, dataRows, 1).getValues();
+    // A warning rather than a refusal: if this list has drifted from the
+    // sheet that was printed, the dropdown must not stop somebody typing the
+    // level that is actually on the paper.
     var rule = SpreadsheetApp.newDataValidation()
         .requireValueInList(LATIN_LEVELS, true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
     for (var r = 0; r < fields.length; r++) {
       var cell = sheet.getRange(r + 2, valueColumn);
@@ -184,6 +206,75 @@ function formatReviewSheet(sheet) {
   }
 
   sheet.getRange(1, 1, lastRow, lastColumn).setVerticalAlignment('middle');
+}
+
+
+/**
+ * Append a blank row to an Unclear sheet, ready to be filled in by hand.
+ *
+ * Typing into the row below the last one gets you a row with no checkboxes
+ * and no text formatting, so the Student ID loses its leading zero and the
+ * answer columns cannot be ticked. This sets all of that up, and copies the
+ * batch and file down from the row above so only the parts that differ have
+ * to be typed.
+ */
+function addCorrectionRow() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  var lastRow = sheet.getLastRow();
+  var lastColumn = sheet.getLastColumn();
+  var ui = SpreadsheetApp.getUi();
+  if (lastRow < 1) {
+    ui.alert('Open a review sheet first.');
+    return;
+  }
+
+  var header = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
+  var index = {};
+  for (var i = 0; i < header.length; i++) {
+    index[String(header[i]).trim()] = i + 1;
+  }
+  var isUnclear = OPTION_COLUMNS.every(function (name) {
+    return index[name];
+  });
+  if (!isUnclear) {
+    ui.alert('Rows can only be added to an Unclear sheet. The Missing sheet ' +
+             'asks for whole fields, which the software already lists in ' +
+             'full.');
+    return;
+  }
+
+  var row = lastRow + 1;
+  sheet.insertRowAfter(lastRow);
+  sheet.getRange(row, 1, 1, lastColumn).setFontFamily(FONT_FAMILY);
+
+  OPTION_COLUMNS.concat(['Done']).forEach(function (name) {
+    if (index[name]) {
+      var cell = sheet.getRange(row, index[name]);
+      cell.insertCheckboxes();
+      cell.setHorizontalAlignment('center');
+    }
+  });
+  TEXT_COLUMNS.forEach(function (name) {
+    if (index[name]) {
+      sheet.getRange(row, index[name]).setNumberFormat('@');
+    }
+  });
+
+  // Carry down the parts that are the same for the whole batch, so only what
+  // actually differs has to be typed.
+  ['Batch', 'File'].forEach(function (name) {
+    if (index[name] && lastRow > 1) {
+      sheet.getRange(row, index[name])
+          .setValue(sheet.getRange(lastRow, index[name]).getValue());
+    }
+  });
+
+  var first = index['Student ID'] || index['Test ID'] || 1;
+  sheet.setActiveRange(sheet.getRange(row, first));
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+      'Fill in enough of Student ID, Test ID, File, Page and Test to name ' +
+      'one test, then the Question number and the answer.',
+      'Correction row added', 8);
 }
 
 
@@ -235,5 +326,9 @@ function columnLetter(column) {
  * CAJCL > Tidy this review sheet.
  *
  * When the corrections are done, File > Download > Comma-separated values for
- * each sheet, and pass the downloaded files to --overrides.
+ * each sheet, and pass the downloaded files to --overrides (or upload them in
+ * step 7 of the website).
+ *
+ * Rows you have not ticked are left alone rather than refused, and come back
+ * as a shorter sheet to finish next time.
  */
