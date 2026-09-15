@@ -380,6 +380,92 @@ def rescue(fills: tp.Sequence[float], thresholds: Thresholds,
         answer_review=min(review, split.cutoff * 0.99))
 
 
+# --- reading a question by contrast ---------------------------------------
+
+#: How many of a test's questions must be too close to call before its rows
+#: are read by contrast instead. A handful of borderline marks is ordinary;
+#: a run of them means the cutoff is in the wrong place for this paper.
+CONTRAST_MIN_UNCLEAR = 5
+
+#: How far above the known-unfilled reference a bubble must sit before it can
+#: be a deliberate mark at all. The floor this produces has to clear the
+#: darkest blank on the page without reaching the faintest real answer.
+CONTRAST_MARGIN = 1.6
+
+#: ...and how many times the rest of its own row it must be. This is what
+#: separates a light pencil mark from a page that is simply grubby: a real
+#: mark towers over its neighbours, whereas dirt raises the whole row.
+CONTRAST_RATIO = 4.0
+
+#: Anything at least this fraction of the darkest bubble in the row counts as
+#: marked too, so a deliberate "A and B" is not reduced to whichever of the
+#: two the student pressed harder.
+CONTRAST_SPREAD = 0.55
+
+#: Spread of the known-unfilled reference, in median absolute deviations. Six
+#: is far out on any sane distribution, which is what is wanted: the reference
+#: has to be an answer to "how dark does a blank bubble get", not "how dark is
+#: a typical one".
+CONTRAST_REFERENCE_DEVIATIONS = 6
+
+#: Below this many reference bubbles there is not enough to be robust about.
+CONTRAST_MINIMUM_REFERENCE = 20
+
+
+def blank_reference(digit_groups: tp.Sequence[tp.Sequence]
+                    ) -> tp.Optional[float]:
+    """How dark a bubble gets on this page when nobody has filled it in.
+
+    Takes every bubble of every digit block except the darkest in each - those
+    are blank by construction, since a digit block holds one answer and nine
+    blanks - and returns a robust upper edge of that population.
+    """
+    blanks: tp.List[float] = []
+    for group in digit_groups:
+        fills = sorted(group.fills, reverse=True)
+        blanks.extend(fills[1:])
+    if len(blanks) < CONTRAST_MINIMUM_REFERENCE:
+        return None
+    ordered = sorted(blanks)
+    middle = len(ordered) // 2
+    median = ordered[middle] if len(ordered) % 2 else \
+        (ordered[middle - 1] + ordered[middle]) / 2
+    deviations = sorted(abs(value - median) for value in ordered)
+    spread = deviations[len(deviations) // 2]
+    return median + CONTRAST_REFERENCE_DEVIATIONS * spread
+
+
+def read_by_contrast(group, reference: float
+                     ) -> tp.Optional[tp.Set[str]]:
+    """What this question says, judged against its own row.
+
+    Returns the letters marked, an empty set for a question left blank, or
+    None when the row is genuinely ambiguous and still needs a person.
+    """
+    floor = reference * CONTRAST_MARGIN
+    ranked = sorted(zip(group.fills, group.labels), reverse=True)
+    if not ranked:
+        return None
+    darkest = ranked[0][0]
+    if darkest < floor:
+        return set()            # nothing here; the student skipped it
+
+    rest = sorted(value for value, _ in ranked[1:])
+    if not rest:
+        return None
+    middle = rest[len(rest) // 2]
+    # Compared against the middle of the row rather than the second darkest,
+    # so a legitimate two-letter answer does not look like a failure to stand
+    # out. The spread rule below is what picks the second letter back up.
+    if middle > 0 and darkest < middle * CONTRAST_RATIO:
+        return None
+    if middle <= 0 and darkest < floor:
+        return None
+
+    return {label for value, label in ranked
+            if value >= darkest * CONTRAST_SPREAD and value >= floor}
+
+
 # --- the calibration report ----------------------------------------------
 
 

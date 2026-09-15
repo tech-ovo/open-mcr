@@ -50,6 +50,9 @@ TITLE = layout.DEFAULT_TITLE
 #: Baseline of the title, as a grid row. Row 1.2 keeps it below the corner
 #: marks, clear of the L-mark to its left, and above the page-code bubbles.
 TITLE_ROW = 1.2
+#: Below the page-code bubbles and above the ID blocks, which is the only
+#: clear band at the top of the sheet.
+MARKING_NOTE_ROW = 3.6
 # The footer and the collation bar sit on the same line as the two bottom
 # corner marks, their bottoms flush with the marks' bottom edge. That puts them
 # as close to the paper edge as the sheet ever prints - no closer than the
@@ -96,25 +99,38 @@ def _text_centered(c: pdfcanvas.Canvas, x_in: float, y_in: float, string: str,
 BUBBLE_LINE_WIDTH = 0.6
 
 
+def _ink(c: pdfcanvas.Canvas) -> float:
+    """How dark this sheet prints its bubbles. Carried on the canvas so the
+    drawing helpers do not each have to be handed the wording object."""
+    return getattr(c, "bubble_ink", layout.BUBBLE_INK)
+
+
 def _bubble(c: pdfcanvas.Canvas, column: int, row: int, filled: bool = False):
     x, y = layout.cell_to_inches(column + 0.5, row + 0.5)
     r = layout.bubble_radius_in()
     c.saveState()
     c.setLineWidth(BUBBLE_LINE_WIDTH)
+    # A solid bubble - the page code - stays black whatever the outlines do:
+    # it is a registration mark, not something a student writes over.
+    if not filled:
+        c.setStrokeGray(_ink(c))
     c.circle(x * inch, y * inch, r * inch, stroke=1, fill=1 if filled else 0)
     c.restoreState()
 
 
 def _label_in_cell(c: pdfcanvas.Canvas, column: int, row: int, string: str,
                    size: float = 7, white: bool = False):
-    """Draw a short label centred inside a grid cell (used inside bubbles)."""
+    """Draw a short label centred inside a grid cell (used inside bubbles).
+
+    The letter inside a bubble is part of what an empty bubble measures, so it
+    follows the sheet's bubble darkness along with the ring.
+    """
     x, y = layout.cell_to_inches(column + 0.5, row + 0.5)
     c.setFont(SERIF, size)
-    if white:
-        c.setFillGray(1.0)
+    c.saveState()
+    c.setFillGray(1.0 if white else _ink(c))
     c.drawCentredString(x * inch, (y - 0.03) * inch, string)
-    if white:
-        c.setFillGray(0.0)
+    c.restoreState()
 
 
 def _caption(c: pdfcanvas.Canvas, column: int, row: int, string: str,
@@ -168,11 +184,18 @@ def _registration_marks(c: pdfcanvas.Canvas):
 
 
 def _header(c: pdfcanvas.Canvas, text: layout.SheetText):
-    """Just the title. Which side you are looking at is said by the page-code
-    bubbles immediately below and again by the footer."""
+    """The title, and the one line about marking that has to be read.
+
+    Which side you are looking at is said by the page-code bubbles immediately
+    below and again by the footer.
+    """
     _, y = layout.cell_to_inches(0, TITLE_ROW)
     _text_centered(c, layout.PAGE_WIDTH_IN / 2, y, text.title, size=11,
                    font=SERIF_BOLD, char_space=1.4)
+    if text.marking_note:
+        _, note_y = layout.cell_to_inches(0, MARKING_NOTE_ROW)
+        _text_centered(c, layout.PAGE_WIDTH_IN / 2, note_y,
+                       text.marking_note, size=7.5, font=SERIF)
 
 
 def _page_code(c: pdfcanvas.Canvas, page_index: int):
@@ -369,6 +392,7 @@ def render(output_path: pathlib.Path,
     output_path.parent.mkdir(parents=True, exist_ok=True)
     c = pdfcanvas.Canvas(str(output_path), pagesize=LETTER)
     c.setTitle(text.title)
+    c.bubble_ink = text.bubble_ink
     for page_index in range(layout.PAGES_PER_SHEET):
         draw_page(c, page_index, text)
         c.showPage()

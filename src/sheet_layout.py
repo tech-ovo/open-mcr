@@ -182,6 +182,33 @@ DEFAULT_DIRECTIONS: tp.Tuple[str, ...] = (
 DEFAULT_WRITE_IN_LABELS: tp.Tuple[str, ...] = ("First Name", "Last Name",
                                                "School")
 
+#: Printed under the title, where a student will actually read it. Everything
+#: the reader finds difficult is settled here: a hard pencil, a tick instead
+#: of a filled bubble, an erasure left half on the page.
+DEFAULT_MARKING_NOTE = (
+    "Fill each bubble completely, in dark pencil or black or blue pen. "
+    "A tick, a cross or a light mark may not be read.")
+
+#: Room for that line before it runs past the edges of the answer columns.
+MAX_MARKING_NOTE_LENGTH = 130
+
+#: How dark the bubbles themselves are printed, on the PDF's own grey scale:
+#: 0.0 is solid black and 1.0 is invisible. This is the *floor* of every
+#: reading - an empty bubble is not blank paper, it is a printed ring with a
+#: letter inside it - so lightening it widens the gap between an untouched
+#: bubble and a lightly-pencilled one.
+#:
+#: 0.0 is what every sheet printed so far uses: a 0.6pt ring in full black,
+#: which measures 0.037 darkness on a 200 dpi scan against 0.005 for bare
+#: paper. Leave it alone unless every sheet in the batch is reprinted - a
+#: batch has to read the same way tomorrow as it did today.
+BUBBLE_INK = 0.0
+
+#: How light the bubbles may be asked to go. Past this the ring stops being
+#: reliably visible to a student filling the sheet in, and a bubble nobody can
+#: see is worse than one that reads a little dark.
+MAX_BUBBLE_INK = 0.55
+
 #: Room on the page, in characters, before a line starts colliding with the
 #: answer columns at this font size.
 MAX_DIRECTION_LENGTH = 86
@@ -190,6 +217,16 @@ MAX_TITLE_LENGTH = 46
 
 class SheetTextError(ValueError):
     """The wording supplied for a sheet cannot be printed as given."""
+
+
+def _number(value: tp.Any, fallback: float) -> float:
+    """A number out of JSON, falling back rather than failing on nonsense."""
+    if value is None or value == "":
+        return fallback
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise SheetTextError(f"'{value}' is not a number.")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -205,6 +242,15 @@ class SheetText:
     directions: tp.Tuple[str, ...] = DEFAULT_DIRECTIONS
     latin_levels: tp.Tuple[str, ...] = LATIN_LEVELS
     write_in_labels: tp.Tuple[str, ...] = DEFAULT_WRITE_IN_LABELS
+
+    marking_note: str = DEFAULT_MARKING_NOTE
+    """One line under the title about what a readable mark looks like. Blank
+    to leave it off."""
+
+    bubble_ink: float = BUBBLE_INK
+    """How dark the printed bubbles are, 0.0 black to 1.0 invisible. See
+    :data:`BUBBLE_INK`: changing it changes what a blank bubble measures, so
+    every sheet in a batch must be printed at the same value."""
 
     def __post_init__(self):
         if not self.title.strip():
@@ -248,6 +294,17 @@ class SheetText:
             raise SheetTextError(
                 f"{len(self.directions)} lines of directions will not fit "
                 "above the emblem; keep it to 12.")
+        if len(self.marking_note) > MAX_MARKING_NOTE_LENGTH:
+            raise SheetTextError(
+                f"The note under the title is {len(self.marking_note)} "
+                "characters and would run past the answer columns; keep it "
+                f"to {MAX_MARKING_NOTE_LENGTH}.")
+        if not 0.0 <= self.bubble_ink <= MAX_BUBBLE_INK:
+            raise SheetTextError(
+                f"Bubble darkness is {self.bubble_ink}; it runs from 0 "
+                f"(black) to {MAX_BUBBLE_INK}. Lighter than that and a "
+                "student cannot reliably see the bubble they are filling "
+                "in.")
 
     @classmethod
     def from_dict(cls, data: tp.Optional[tp.Mapping[str, tp.Any]]
@@ -275,7 +332,11 @@ class SheetText:
                        for level in (data.get("latin_levels")
                                      or LATIN_LEVELS)),
                    write_in_labels=strings("write_in_labels",
-                                           DEFAULT_WRITE_IN_LABELS))
+                                           DEFAULT_WRITE_IN_LABELS),
+                   marking_note=str(
+                       DEFAULT_MARKING_NOTE if data.get("marking_note") is None
+                       else data.get("marking_note")).strip(),
+                   bubble_ink=_number(data.get("bubble_ink"), BUBBLE_INK))
 
     def to_dict(self) -> tp.Dict[str, tp.Any]:
         return {
@@ -283,4 +344,6 @@ class SheetText:
             "directions": list(self.directions),
             "latin_levels": list(self.latin_levels),
             "write_in_labels": list(self.write_in_labels),
+            "marking_note": self.marking_note,
+            "bubble_ink": self.bubble_ink,
         }

@@ -258,6 +258,22 @@ def shade_out(page: np.ndarray, which: str) -> np.ndarray:
     return page
 
 
+def bury(page: np.ndarray, which: str) -> np.ndarray:
+    """Scribble densely over one corner mark, the way a bored student does.
+
+    Not a single stroke but a mass of overlapping loops, which is what defeats
+    shape matching: the mark and the pen merge into one blob that is neither
+    square nor solid, so nothing recognises it and nothing measures it.
+    """
+    x, y = _corner_pixels(page, which)
+    ink = np.full_like(page, 255)
+    for index in range(14):
+        angle = index * 25
+        cv2.ellipse(ink, (x + (index % 5) * 6 - 12, y + (index % 3) * 6 - 6),
+                    (46, 16), angle, 0, 360, 0, 3, cv2.LINE_AA)
+    return np.minimum(page, ink)
+
+
 def doodle_in_margin(page: np.ndarray) -> np.ndarray:
     """Idle scribbles well away from the marks."""
     page = page.copy()

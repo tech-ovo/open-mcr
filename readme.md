@@ -44,7 +44,9 @@ answer sheet.
 | **Batch splitting** | Scan ten students as one twenty-page PDF and it is split into ten sheets automatically, matched on the printed page-code mark and the Student ID rather than on where a page happens to sit. |
 | **One bad page costs one paper** | A page whose corner marks are unreadable, or that has no partner, or whose two sides disagree about whose paper they are, is set aside on its own. Everything around it is still graded. |
 | **A page report** | `Pages.csv` lists every page that went in and what became of it — graded, blank, unreadable, unpaired, ID mismatch, wrong side — so "did every paper come back?" has an answer without anyone having to notice a warning. |
-| **Damaged corner marks** | If the marks cannot be recognised, the page is thresholded darker and tried again (printed marks survive a cutoff that drops graphite), and failing that the marks are found by position alone. A mark scribbled over, or filled in solid, still reads. |
+| **Damaged corner marks** | A mark scribbled over, or filled in solid, still reads. The page is thresholded darker and tried again (printed marks survive a cutoff that drops graphite); a corner that is buried entirely is reconstructed from the other three, since the fourth corner of a rectangle is not a guess; and failing both, the marks are found by position alone. |
+| **A grid that is checked before it is believed** | The recovered grid has to be a *rectangle* of the sheet's proportions, with its corners on the page. Equal opposite sides are not enough — a sheared parallelogram has those — so the diagonals are compared too. A wrong grid reads every bubble in the wrong place while looking perfectly self-consistent, and this is what catches it. |
+| **Faint marks read by contrast** | A student whose pressure varies threefold across one test defeats any single cutoff. Where a test is mostly borderline, each question is judged against its own row instead: the intended bubble is twenty or thirty times darker than its neighbours even when it is far below the cutoff. The known-unfilled bubbles of the ID blocks say how dark blank gets on that page. |
 | **One-sided scans** | `--sides front` grades a stack of front pages a page at a time instead of in pairs, and `--skip-blanks` passes over the empty reverses a duplex scanner produces for them. |
 | **Calibrated thresholds** | The filled/blank cutoff is measured from the scans themselves, once per PDF, so a different scanner needs no retuning. Printed to `Calibration.txt` and overridable with `--threshold`. |
 | **A plain cutoff, so `AB` is readable** | A bubble is filled when it is dark enough - never "the darkest of the five" - so a student who means A *and* B is read as `AB`. |
@@ -55,7 +57,8 @@ answer sheet.
 | **More than one round** | Rows you have not ticked off are left exactly as they were and come back as a shorter sheet, so a review can be done in several sittings. `--ignore-done` is there for the day somebody works through every row and forgets the column. |
 | **Regrade without rescanning** | `--regrade` re-scores an existing `Results.csv` against a corrected key or corrected review sheets. |
 | **Question statistics** | `Question Stats.csv` gives per-question counts and percent correct. |
-| **Marked-up PDFs** | `--annotate` rings every bubble the reader acted on, answers and metadata alike. `--annotate-students unknown` narrows it to the papers whose Student ID did not come through, which is a job somebody can actually finish. |
+| **Marked-up PDFs** | `--annotate` rings every bubble the reader acted on, answers and metadata alike. `--annotate-students unknown` narrows it to the papers whose Student ID did not come through, which is a job somebody can actually finish, and `--annotate-pages` to particular pages. `--annotate-grid` draws the cell lattice the page was read against — the answer to "where did it think the bubbles were". |
+| **Bubble darkness you can set** | An empty bubble is not blank paper; it is a printed ring with a letter in it, and that is the floor every reading sits on. Printing it lighter widens the gap between untouched and lightly-pencilled. |
 | **Grade some tests, not all** | `--tests 2` reads the second test on the sheet and ignores the rest - no results, no key needed, nothing on the review sheets. |
 | **A website, for everyone else** | The same pipeline behind a hosted endpoint, driven by a one-page site that walks an operator through all seven steps. Nothing is stored on the server. |
 
@@ -107,6 +110,32 @@ To regenerate the PDF after changing the layout:
 ```sh
 python -m src.sheet_generation src/assets/cajcl_answer_sheet.pdf
 ```
+
+### How dark the sheet prints
+
+The bubbles are printed at **full black with a 0.6 pt ring** by default, which
+is what every sheet printed so far uses. An empty bubble measures about 0.037
+darkness on a 200 dpi scan, against 0.005 for bare paper: that is the floor
+every reading sits on, since an empty bubble is a printed ring with a letter
+inside it rather than blank paper.
+
+Printing them lighter widens the gap between untouched and lightly-pencilled.
+`SheetText.bubble_ink` runs from 0.0 (black) to 0.55, and step 2 of the website
+exposes it. Measured on the generated sheet:
+
+| `bubble_ink` | An empty bubble measures |
+|---|---|
+| 0.0 (default) | 0.010 |
+| 0.25 | 0.005 |
+| 0.4 | 0.0005 |
+
+**Every sheet in a batch has to be printed at the same value**, since it moves
+what "blank" means. Leave it alone unless you are reprinting.
+
+The sheet also carries a line under the title about what a readable mark looks
+like — `SheetText.marking_note`, and editable in step 2. Everything the reader
+finds difficult is settled before the paper is collected: a hard pencil, a tick
+instead of a filled bubble, an erasure left half on the page.
 
 ### Answer keys
 
@@ -610,6 +639,41 @@ black). So a **higher number is stricter**: it demands a darker mark before
 the bubble counts. Lowering a cutoff makes the reader more willing to call a
 faint mark an answer.
 
+#### When no cutoff will do
+
+A cutoff is a statement about the whole batch, and a student who presses
+lightly is not the whole batch. Two fallbacks handle them, in order, and both
+say so in `Calibration.txt` rather than quietly doing something clever.
+
+**A cutoff from one test.** If more than about a third of a test's questions
+land in the review band, that test is re-read against a cutoff measured from
+its own bubbles alone. It applies only if those bubbles split cleanly, only if
+the new cutoff is *lower* than the batch's, and only if it leaves at most half
+as many questions in doubt.
+
+**A row judged against itself.** If the test is still mostly borderline — and
+its Test ID came through, so this is one student's pencil rather than a bad
+scan — each question is decided by contrast instead of by darkness. Within a
+row the intended bubble is not marginally darker than its neighbours; it is
+twenty or thirty times darker, even at a fifth of normal pressure.
+
+Two things keep that safe. A bubble must clear a floor drawn from the
+*known-unfilled* bubbles of the Student ID and Test ID blocks — nine of every
+ten bubbles in a digit block are blank by construction, and they have a
+character printed inside them exactly as an answer bubble has a letter. (The
+Latin level block is deliberately not used: its bubbles are empty circles, so
+they run lighter and would put the floor too low.) And the winner must stand
+four times clear of the middle of its own row, which is what separates a light
+pencil mark from a page that is merely grubby. Anything at least 55% as dark
+as the winner is taken as marked too, so a deliberate "A and B" survives.
+
+A row that fails either test is not guessed at. It goes to `Unclear.csv` as
+before.
+
+On a real sheet whose marks ran from 0.17 to 0.72 in darkness, the batch
+cutoff of 0.52 read 12 of 80 answers. Reading by contrast read 39, left 3 for
+a person, and correctly called the other 38 blank.
+
 You do not have to give all four. Anything left out is calibrated as usual:
 
 ```sh
@@ -639,6 +703,8 @@ python -m src.main --key-template <Keys.csv>
 | `--threshold SPEC` | Use these cutoffs instead of calibrating. Four numbers, two, one, blanks for "calibrate this one", or names such as `answer=0.42`. |
 | `--annotate` | Also write marked-up copies of every scan. |
 | `--annotate-students WHO` | Narrow `--annotate` to `unknown` (the papers whose Student ID could not be read in full) or to a list of Student IDs. |
+| `--annotate-pages N[,N...]` | Narrow `--annotate` to these page numbers, counted within their own file. |
+| `--annotate-grid` | Draw the cell grid the page was read against on the marked-up copies. |
 | `--tests N[,N...]` | Grade only these tests, numbered from 1 across the sheet. Default: all of them. |
 | `--sides front\|back` | The scan holds only one side of the sheet. Pages are then read one at a time rather than in pairs, and only that side's tests are graded. Default: both. |
 | `--skip-blanks` | Pass over pages with nothing on them — the empty reverses a duplex scanner produces for a one-sided original. They are listed in `Pages.csv` either way. |

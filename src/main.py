@@ -69,6 +69,14 @@ def build_parser() -> argparse.ArgumentParser:
                              "at: 'unknown' for the ones whose Student ID\n"
                              "could not be read in full, or a list of\n"
                              "Student IDs. Defaults to all of them.")
+    parser.add_argument("--annotate-pages", metavar="N[,N...]",
+                        help="Narrow --annotate to these page numbers,\n"
+                             "counted within their own file.")
+    parser.add_argument("--annotate-grid", action="store_true",
+                        help="Draw the cell grid the page was read\n"
+                             "against, on the marked-up copies. The\n"
+                             "answer to 'where did it think the bubbles\n"
+                             "were'.")
     parser.add_argument("--sides", metavar="SIDE[,SIDE]", default="",
                         help="Which sides of the sheet this scan contains:\n"
                              "'front', 'back', or both. A one-sided scan is\n"
@@ -118,6 +126,22 @@ def _parse_sides(raw: str) -> tuple:
         raise pipeline.BreakingError(
             "At least one side of the sheet has to be included in the scan.")
     return tuple(sorted(wanted))
+
+
+def _parse_numbers(raw):
+    """Read a "1,3,5" list into page numbers."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    wanted = []
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise pipeline.BreakingError(f"'{part}' is not a page number.")
+        wanted.append(int(part))
+    return tuple(wanted) or None
 
 
 def _parse_students(raw):
@@ -304,6 +328,9 @@ def main(argv: list) -> int:
                                       annotate=args.annotate,
                                       annotate_students=_parse_students(
                                           args.annotate_students),
+                                      annotate_pages=_parse_numbers(
+                                          args.annotate_pages),
+                                      annotate_grid=args.annotate_grid,
                                       tests=pipeline.parse_tests(
                                           args.tests,
                                           layout.TESTS_PER_SHEET),

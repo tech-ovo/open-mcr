@@ -20,6 +20,10 @@ import cv2
 import numpy as np
 
 from . import image_utils
+from . import sheet_layout as layout
+
+GRID_ACROSS = layout.GRID_COLUMNS
+GRID_DOWN = layout.GRID_ROWS
 
 # BGR, because that is what OpenCV draws in.
 CORRECT_COLOR = (60, 150, 40)
@@ -52,18 +56,34 @@ def _box(image: np.ndarray,
 
     Used where there is no single bubble to point at - a required field that
     came back blank - so the gap itself is what gets marked.
+
+    The box follows the bubbles rather than the edges of the page. A sheet fed
+    in crooked is read against a grid that is crooked to match, and an
+    upright box drawn over it sits visibly askew of the row it is pointing
+    at - which makes the reader doubt the reading rather than the bubbling.
     """
     if not circles:
         return
     radius = max(circle[2] for circle in circles)
     pad = radius * 0.55
-    left = int(round(min(circle[0] for circle in circles) - radius - pad))
-    right = int(round(max(circle[0] for circle in circles) + radius + pad))
-    top = int(round(min(circle[1] for circle in circles) - radius - pad))
-    bottom = int(round(max(circle[1] for circle in circles) + radius + pad))
+    points = np.array([[circle[0], circle[1]] for circle in circles],
+                      dtype=np.float32)
     thickness = max(int(round(radius * RING_FRACTION)), 2)
-    cv2.rectangle(image, (left, top), (right, bottom), color, thickness,
-                  lineType=cv2.LINE_AA)
+    if len(circles) == 1:
+        centre, half = points[0], radius + pad
+        corners = np.array([[centre[0] - half, centre[1] - half],
+                            [centre[0] + half, centre[1] - half],
+                            [centre[0] + half, centre[1] + half],
+                            [centre[0] - half, centre[1] + half]],
+                           dtype=np.float32)
+    else:
+        # minAreaRect finds the rectangle the bubbles actually lie in, at
+        # whatever angle the page went through the scanner at.
+        (centre_x, centre_y), (width, height), angle = cv2.minAreaRect(points)
+        grown = (width + 2 * (radius + pad), height + 2 * (radius + pad))
+        corners = cv2.boxPoints(((centre_x, centre_y), grown, angle))
+    cv2.polylines(image, [np.int32(np.round(corners))], True, color,
+                  thickness, lineType=cv2.LINE_AA)
 
 
 def _legend(image: np.ndarray, heading: str, scored: bool):
@@ -98,7 +118,8 @@ def _legend(image: np.ndarray, heading: str, scored: bool):
 
 
 def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
-                  tests_before: int = 0, only_tests=None) -> np.ndarray:
+                  tests_before: int = 0, only_tests=None,
+                  show_grid: bool = False) -> np.ndarray:
     """Draw one page's reading onto a copy of the scan.
 
     ``keys`` maps a test number to the key it was scored against, so each
@@ -107,6 +128,10 @@ def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
     annotated = image.copy()
     if annotated.ndim == 2:
         annotated = cv2.cvtColor(annotated, cv2.COLOR_GRAY2BGR)
+
+    # Underneath everything else, so the rings stay legible over it.
+    if show_grid and getattr(scan, "corners", None):
+        _draw_grid(annotated, scan.corners, GRID_ACROSS, GRID_DOWN)
 
     select = thresholds.metadata_select
     review = thresholds.metadata_review
@@ -173,6 +198,51 @@ def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
 #: could not be read in full.
 UNKNOWN_IDS = "unknown"
 
+#: Colour of the cell lattice, when it is drawn. Deliberately not one of the
+#: reading colours: the grid is the software showing its working, not a
+#: judgement about a bubble.
+GRID_COLOR = (200, 120, 200)
+
+
+def _draw_grid(image: np.ndarray,
+               corners: tp.Sequence[tp.Tuple[float, float]],
+               across: int, down: int):
+    """Overlay the cell lattice the page was read against.
+
+    Interpolated across the quadrilateral the corner marks define, which is
+    how the reader lays its cells out in the first place, so what is drawn is
+    what was used rather than an idealised version of it.
+    """
+    if not corners or len(corners) != 4:
+        return
+    height, width = image.shape[:2]
+    top_left, top_right, bottom_right, bottom_left = [
+        (x * width, y * height) for x, y in corners]
+
+    def along(first, second, fraction):
+        return (first[0] + (second[0] - first[0]) * fraction,
+                first[1] + (second[1] - first[1]) * fraction)
+
+    for column in range(across + 1):
+        fraction = column / across
+        start = along(top_left, top_right, fraction)
+        end = along(bottom_left, bottom_right, fraction)
+        cv2.line(image, (int(start[0]), int(start[1])),
+                 (int(end[0]), int(end[1])), GRID_COLOR, 1, cv2.LINE_AA)
+    for row in range(down + 1):
+        fraction = row / down
+        start = along(top_left, bottom_left, fraction)
+        end = along(top_right, bottom_right, fraction)
+        cv2.line(image, (int(start[0]), int(start[1])),
+                 (int(end[0]), int(end[1])), GRID_COLOR, 1, cv2.LINE_AA)
+
+
+def wants_page(page_number: int, only_pages) -> bool:
+    """Should this page get a marked-up copy, by its number in the batch?"""
+    if only_pages is None:
+        return True
+    return page_number in only_pages
+
 
 def _normalise_id(student: str) -> str:
     return (student or "").strip().lstrip("0") or "0"
@@ -200,7 +270,8 @@ def wants_student(student: tp.Optional[str], only_students) -> bool:
 
 def write_marked_up(image_paths, scans_by_page, sheets, rows,
                     thresholds_by_file, keys, output_folder: pathlib.Path,
-                    console, only_tests=None, only_students=None
+                    console, only_tests=None, only_students=None,
+                    only_pages=None, show_grid=False
                     ) -> tp.List[pathlib.Path]:
     """One marked-up PDF per input file. Pages are re-read from the source and
     spooled to disk, so a large batch stays within bounded memory.
@@ -237,6 +308,7 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
             wants_student(id_for_page.get((page.path.name,
                                            page.page_index + 1)),
                           only_students)
+            and wants_page(page.page_index + 1, only_pages)
             for page in sheet.pages)
         for page in sheet.pages:
             scan = scans_by_page.get((page.path, page.page_index))
@@ -279,7 +351,8 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
                             }
                             annotated = annotate_page(
                                 image, scan, thresholds_by_file[path],
-                                keys_here, heading, before, only_tests)
+                                keys_here, heading, before, only_tests,
+                                show_grid=show_grid)
                             spool_path = spool / f"{len(spooled):05d}.jpg"
                             cv2.imwrite(str(spool_path), annotated,
                                         [int(cv2.IMWRITE_JPEG_QUALITY), 85])

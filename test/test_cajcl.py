@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pytest
 
 import synthetic_sheets as ss
@@ -257,6 +258,50 @@ def test_a_damaged_page_is_still_read_correctly(damaged_front, damage):
     got_id, got_answers = _read_front(damage(page))
     assert got_id == student_id
     assert got_answers == answers
+
+
+def test_a_sheared_grid_is_refused(tmp_path):
+    """The check that was missing, and that let a real sheet be misread.
+
+    Equal opposite sides say nothing about shear: a parallelogram leaning far
+    enough to put its top-left corner off the side of the page satisfies them
+    perfectly. Equal diagonals are what make it a rectangle.
+    """
+    from src import corner_finding
+    from src.geometry_utils import Point
+
+    page = np.zeros((1584, 1224), dtype=np.uint8)
+    # The exact quadrilateral a scribbled-over corner produced: a clean
+    # parallelogram, correct aspect, one corner 236 pixels off the page.
+    sheared = [Point(-236, 90), Point(846, 92), Point(1160, 1503),
+               Point(78, 1501)]
+    assert not corner_finding._grid_is_plausible(sheared, page, 0.75)
+
+    honest = [Point(75, 71), Point(1157, 73), Point(1160, 1504),
+              Point(78, 1502)]
+    assert corner_finding._grid_is_plausible(honest, page, 0.75)
+
+
+def test_a_corner_mark_buried_under_a_scribble_is_recovered():
+    """Three corners are enough: the fourth follows from the rectangle.
+
+    A student scribbling over one mark leaves a blob that is neither square
+    nor solid, so nothing recognises it and nothing measures it - but the
+    other three marks are untouched and they fix where it was.
+    """
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    buried = ss.bury(ss.render_sheet(sheet)[0], "tr")
+    scan = reading.scan_page_either_side(
+        cv2.cvtColor(buried, cv2.COLOR_GRAY2BGR), grid_info.form_cajcl)
+    cutoffs = th.calibrate(scan.answer_fills, scan.metadata_fills)[0]
+    assert reading.read_digits(scan.student_id, cutoffs) == "04275"
+    answers = "".join(
+        sorted(group.selected(cutoffs))[0]
+        if len(group.selected(cutoffs)) == 1 else "?"
+        for group in scan.tests[0][1])
+    assert answers == "".join(cycled(0))
 
 
 def test_corner_finding_refuses_a_page_with_no_marks(tmp_path):

@@ -40,6 +40,9 @@ STEP 2 - Design and print the answer sheet
 Title across the top
 One line each
 Up to 12 lines, each at most 86 characters.
+Darkness
+0 is black, 0.55 is nearly invisible
+At most 130 characters
 2 Design and print the answer sheet Default wording
 You can change the wording and Latin levels. The bubbles and corner marks are fixed. Reprint after any change.
 Latin levels
@@ -53,6 +56,10 @@ Generate PDF
 Reset wording
 Copy a link with this design
 That link contains the invite from step 1 as well as everything in this step. Send this link rather than the plain invite if you have customized any wording.
+Bubble darkness
+How dark the bubbles themselves are printed. An empty bubble is not blank paper — it is a printed ring with a letter inside it — so this is the floor every reading sits on, and printing it lighter leaves more room between an untouched bubble and a lightly-pencilled one. Every sheet in a batch must be printed at the same setting.
+Note to students
+One line under the title, where somebody about to fill the sheet in will read it. Leave it empty to print nothing.
 Printing
 Print double-sided (your printer may call this duplex).
 Use 100% scale if possible. ‘Fit to page’ is acceptable if your printer requires it, but it makes the bubbles smaller.
@@ -115,6 +122,8 @@ STEP 5 - Advanced
 ======================================================================
 Student IDs
 Separated by commas
+Pages
+Numbered within their own scan, separated by commas
 Answer cutoff
 Answer review threshold
 ID cutoff
@@ -133,6 +142,9 @@ Marked-up scans show which bubbles were read as filled, along with the correct a
 Mark up every paper
 Mark up only where the Student ID could not be read
 Mark up only certain Student IDs
+Mark up only certain pages
+Draw the grid it read against
+Every cell the reader laid over the page, not just the bubbles it acted on. This is what to look at when a sheet has been read wrongly and it is not obvious why.
 Thresholds
 Every bubble is measured for darkness on a scale from 0 (blank paper) to 1 (solid black). A bubble darker than the cutoff counts as filled. One that lands between the review threshold and the cutoff goes to step 7 for a person to decide. Anything fainter is ignored.
 Where those two cutoffs fall depends on the scanner, the paper, and how hard the students pressed. So the server measures them from each batch of scans rather than using fixed numbers.
@@ -140,6 +152,7 @@ Override thresholds (not recommended)
 A higher number is stricter: it demands a darker mark. Leave a box empty to compute that one automatically — you can pin one number and let the other three be measured.
 After a run, Calibration.txt shows the computed thresholds, so you can copy those numbers here to repeat it.
 06767, 06768
+3, 4, 11
 automatic
 
 ======================================================================
@@ -265,7 +278,8 @@ already here
 not in that file, and
 left alone.
 Upload undone.
-not a Student ID. They are {read.digits} digits, so write them as numbers separated by commas.
+not a Student ID. They are {ids.digits} digits, so write them as numbers separated by commas.
+not a page number. Count from 1 within each scan.
 mark-up, some papers
 mark-up on
 thresholds fixed

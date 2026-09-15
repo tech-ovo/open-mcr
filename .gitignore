@@ -144,3 +144,7 @@ manual.pdf
 
 # macOS Finder metadata
 .DS_Store
+
+# Scans used for testing. Real student papers do not belong in a public repo.
+*.pdf
+!src/assets/*.pdf

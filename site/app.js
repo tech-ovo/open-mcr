@@ -33,8 +33,10 @@ function blank() {
     thresholdMode: 'auto',
     threshold: { as: '', ar: '', ms: '', mr: '' },
     annotate: false,
-    annotateWho: '',             // '', 'unknown', or 'list'
+    annotateWho: '',             // '', 'unknown', 'list' or 'pages'
     annotateIds: '',
+    annotatePages: '',
+    annotateGrid: false,
     onlyTests: null,             // null grades every test on the sheet
     sides: null,                 // null means both sides were scanned
     skipBlanks: false,
@@ -465,6 +467,8 @@ function renderSheetForm() {
   }
   $('sheet-title').value = sheet.title;
   $('directions').value = sheet.directions.join('\n');
+  $('marking-note').value = sheet.marking_note || '';
+  $('bubble-ink').value = sheet.bubble_ink == null ? 0 : sheet.bubble_ink;
   renderDirectionCount();
 
   const levels = $('levels');
@@ -1273,6 +1277,24 @@ function annotateSpec() {
   return '';
 }
 
+/* Page numbers for the mark-up filter, and anything typed that cannot be one. */
+function readAnnotatePages() {
+  const listed = (state.annotatePages || '').split(/[,;]/)
+    .map((item) => item.trim()).filter(Boolean);
+  const good = [];
+  const bad = [];
+  listed.forEach((item) => {
+    if (/^[0-9]+$/.test(item) && Number(item) > 0) good.push(item);
+    else bad.push(item);
+  });
+  return { good: good, bad: bad };
+}
+
+function annotatePagesSpec() {
+  if (!state.annotate || state.annotateWho !== 'pages') return '';
+  return readAnnotatePages().good.join(',');
+}
+
 /* The Student IDs typed into the mark-up filter, and anything typed there
    that cannot be one. Digits only: students bubble digits, so a word in this
    box would silently match nobody. */
@@ -1296,17 +1318,25 @@ function renderAnnotateWho() {
   box.hidden = !state.annotate;
   $('annotate-students').value = state.annotateWho || '';
   $('annotate-list').hidden = state.annotateWho !== 'list';
+  $('annotate-pagebox').hidden = state.annotateWho !== 'pages';
   $('annotate-ids').value = state.annotateIds || '';
+  $('annotate-pagenums').value = state.annotatePages || '';
+  $('annotate-grid').checked = !!state.annotateGrid;
 
-  const read = readAnnotateIds();
-  const showing = state.annotate && state.annotateWho === 'list';
-  if (!showing || !read.bad.length) {
-    say('msg-annotate-ids', '', '');
-  } else {
+  const ids = readAnnotateIds();
+  const pages = readAnnotatePages();
+  if (state.annotate && state.annotateWho === 'list' && ids.bad.length) {
     say('msg-annotate-ids', 'bad',
-        quotedList(read.bad) + ' ' + plural(read.bad.length, 'is', 'are') +
-        ' not a Student ID. They are ' + read.digits +
+        quotedList(ids.bad) + ' ' + plural(ids.bad.length, 'is', 'are') +
+        ' not a Student ID. They are ' + ids.digits +
         ' digits, so write them as numbers separated by commas.');
+  } else if (state.annotate && state.annotateWho === 'pages'
+             && pages.bad.length) {
+    say('msg-annotate-ids', 'bad',
+        quotedList(pages.bad) + ' ' + plural(pages.bad.length, 'is', 'are') +
+        ' not a page number. Count from 1 within each scan.');
+  } else {
+    say('msg-annotate-ids', '', '');
   }
 }
 
@@ -1740,6 +1770,8 @@ function batchCard(batch, index) {
     form.append('sides', sidesSpec());
     form.append('skip_blanks', state.skipBlanks ? 'true' : 'false');
     form.append('annotate_students', annotateSpec());
+    form.append('annotate_pages', annotatePagesSpec());
+    form.append('annotate_grid', state.annotateGrid ? 'true' : 'false');
     if (state.sheet) form.append('layout', JSON.stringify(state.sheet));
 
     const started = performance.now();
@@ -2153,6 +2185,18 @@ function start() {
     if (state.sheet) state.sheet.directions = directionsFromBox();
     save(); renderDirectionCount();
   };
+  $('marking-note').oninput = () => {
+    if (state.sheet) {
+      state.sheet.marking_note = $('marking-note').value;
+    }
+    save();
+  };
+  $('bubble-ink').oninput = () => {
+    if (!state.sheet) return;
+    const ink = parseFloat($('bubble-ink').value);
+    state.sheet.bubble_ink = isNaN(ink) ? 0 : ink;
+    save();
+  };
   $('add-level').onclick = () =>
     setLevelCount(state.sheet ? state.sheet.latin_levels.length + 1 : 0);
   $('drop-level').onclick = () =>
@@ -2221,6 +2265,15 @@ function start() {
     state.annotateIds = $('annotate-ids').value;
     save();
     renderAnnotateWho();
+  };
+  $('annotate-pagenums').oninput = () => {
+    state.annotatePages = $('annotate-pagenums').value;
+    save();
+    renderAnnotateWho();
+  };
+  $('annotate-grid').onchange = () => {
+    state.annotateGrid = $('annotate-grid').checked;
+    save(); renderAdvancedHint();
   };
   $('skip-blanks').onchange = () => {
     state.skipBlanks = $('skip-blanks').checked;

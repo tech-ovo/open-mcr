@@ -129,6 +129,17 @@ ASPECT_TOLERANCE = 0.08
 #: "grid" smaller than this is some small feature of the page, not the sheet.
 MIN_GRID_SPAN = 0.45
 
+#: How far the two diagonals may differ. This is the test that a quadrilateral
+#: is a *rectangle* rather than merely a parallelogram: equal opposite sides
+#: say nothing about shear, and a sheared grid reads every bubble in the wrong
+#: place while looking perfectly self-consistent.
+DIAGONAL_TOLERANCE = 0.06
+
+#: How far outside the page a corner may sit, as a fraction of the page. A
+#: little slack for a sheet scanned right to the edge; a corner properly off
+#: the page is arithmetic gone wrong, not a scan.
+OFF_PAGE_TOLERANCE = 0.02
+
 #: A blob is only a candidate corner mark if it fills this much of its own
 #: bounding box. Filters out the stray open curves an edge detector finds.
 MIN_MARK_SOLIDITY = 0.55
@@ -169,14 +180,41 @@ def _grid_is_plausible(corners: geometry_utils.Polygon, image: np.ndarray,
     if width < MIN_GRID_SPAN * page_width or \
             height < MIN_GRID_SPAN * page_height:
         return False
-    # Opposite sides of a rectangle stay about equal under perspective.
+
     top_left, top_right, bottom_right, bottom_left = corners
+    # The sheet was on the platen, so its corners are on the page.
+    margin_x = OFF_PAGE_TOLERANCE * page_width
+    margin_y = OFF_PAGE_TOLERANCE * page_height
+    for point in corners:
+        if not (-margin_x <= point.x <= page_width + margin_x
+                and -margin_y <= point.y <= page_height + margin_y):
+            return False
+
+    # Opposite sides of a rectangle stay about equal under perspective...
     tops = geometry_utils.calc_2d_dist(top_left, top_right)
     bottoms = geometry_utils.calc_2d_dist(bottom_left, bottom_right)
     lefts = geometry_utils.calc_2d_dist(top_left, bottom_left)
     rights = geometry_utils.calc_2d_dist(top_right, bottom_right)
-    return (math_utils.is_approx_equal(tops, bottoms, 0.15)
-            and math_utils.is_approx_equal(lefts, rights, 0.15))
+    if not (math_utils.is_approx_equal(tops, bottoms, 0.15)
+            and math_utils.is_approx_equal(lefts, rights, 0.15)):
+        return False
+
+    # ...and so do its diagonals, which is the part that catches a shear. A
+    # parallelogram has equal opposite sides however far it leans; only a
+    # rectangle has equal diagonals.
+    first = geometry_utils.calc_2d_dist(top_left, bottom_right)
+    second = geometry_utils.calc_2d_dist(top_right, bottom_left)
+    return math_utils.is_approx_equal(first, second, DIAGONAL_TOLERANCE)
+
+
+def _completed(first: geometry_utils.Point, second: geometry_utils.Point,
+               opposite: geometry_utils.Point) -> geometry_utils.Point:
+    """The fourth corner of the rectangle whose other three are given.
+
+    ``opposite`` is the corner diagonally across from the one wanted.
+    """
+    return geometry_utils.Point(first.x + second.x - opposite.x,
+                                first.y + second.y - opposite.y)
 
 
 def _corner_from_l_mark(l_mark_origin: geometry_utils.Point,
@@ -370,23 +408,45 @@ def _find_by_shape(image: np.ndarray,
                          abs(centroid.x) + abs(centroid.y)))
                     break
 
-        if not all(buckets):
+        # One of the three squares may be missing - buried under a pen
+        # scribble, most often - and that is recoverable: the fourth corner of
+        # a rectangle follows from the other three. Two missing is not.
+        if sum(1 for bucket in buckets if not bucket) > 1:
             continue
         # Of the squares that could be a given corner, take the one furthest
         # out. These are office-scanned pages: there is nothing outside the
         # sheet's own marks, so the outermost candidate is the mark, while an
         # inner one is a bubble or a letter that happens to be square.
         chosen = [min(bucket, key=lambda item: (-item[2], item[0]))
-                  for bucket in buckets]
-        score = sum(item[0] for item in chosen)
+                  if bucket else None for bucket in buckets]
+        score = sum(item[0] for item in chosen if item is not None)
         top_right, bottom_left, bottom_right = (
-            geometry_utils.guess_centroid(item[1].polygon) for item in chosen)
+            geometry_utils.guess_centroid(item[1].polygon)
+            if item is not None else None for item in chosen)
 
-        corners = [
-            _corner_from_l_mark(l_mark.get_origin(), bottom_left,
-                                bottom_right, l_mark_offset),
-            top_right, bottom_right, bottom_left,
-        ]
+        # The L-mark's own corner needs two of the squares to project it out,
+        # so it is recovered after any missing square has been filled in.
+        if bottom_left is not None and bottom_right is not None:
+            top_left = _corner_from_l_mark(l_mark.get_origin(), bottom_left,
+                                           bottom_right, l_mark_offset)
+            if top_right is None:
+                top_right = _completed(top_left, bottom_right, bottom_left)
+        elif bottom_left is None:
+            # Recover the L-mark's corner against the diagonal that is left,
+            # then close the rectangle.
+            top_left = _corner_from_l_mark(
+                l_mark.get_origin(),
+                _completed(top_right, bottom_right, bottom_right),
+                bottom_right, l_mark_offset)
+            bottom_left = _completed(top_left, bottom_right, top_right)
+        else:
+            top_left = _corner_from_l_mark(l_mark.get_origin(), bottom_left,
+                                           _completed(top_right, bottom_left,
+                                                      bottom_left),
+                                           l_mark_offset)
+            bottom_right = _completed(top_right, bottom_left, top_left)
+
+        corners = [top_left, top_right, bottom_right, bottom_left]
         if not _grid_is_plausible(corners, image, aspect):
             continue
         if best is None or score < best[0]:

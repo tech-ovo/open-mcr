@@ -406,6 +406,29 @@
     </p>
     <div class="msg" id="msg-sheet"></div>
 
+    <h3>Bubble darkness</h3>
+    <p class="note">
+      How dark the bubbles themselves are printed. An empty bubble is not
+      blank paper &mdash; it is a printed ring with a letter inside it &mdash;
+      so this is the floor every reading sits on, and printing it lighter
+      leaves more room between an untouched bubble and a lightly-pencilled
+      one. <strong>Every sheet in a batch must be printed at the same
+      setting.</strong>
+    </p>
+    <div class="pairs">
+      <label><span class="lab">Darkness</span>
+        <span class="sub">0 is black, 0.55 is nearly invisible</span>
+        <input type="number" id="bubble-ink" step="0.05" min="0" max="0.55"></label>
+    </div>
+
+    <h3>Note to students</h3>
+    <p class="note">
+      One line under the title, where somebody about to fill the sheet in will
+      read it. Leave it empty to print nothing.
+    </p>
+    <label><span class="sub">At most 130 characters</span>
+      <input type="text" id="marking-note" autocomplete="off"></label>
+
     <h3>Printing</h3>
     <ul class="note">
       <li>Print <strong>double-sided</strong> (your printer may call this
@@ -624,13 +647,27 @@
           <option value="">Mark up every paper</option>
           <option value="unknown">Mark up only where the Student ID could not be read</option>
           <option value="list">Mark up only certain Student IDs</option>
+          <option value="pages">Mark up only certain pages</option>
         </select></label>
       <label id="annotate-list" hidden><span class="lab">Student IDs</span>
         <span class="sub">Separated by commas</span>
         <input type="text" id="annotate-ids" placeholder="06767, 06768"
                autocomplete="off" spellcheck="false"
                inputmode="numeric"></label>
+      <label id="annotate-pagebox" hidden><span class="lab">Pages</span>
+        <span class="sub">Numbered within their own scan, separated by
+          commas</span>
+        <input type="text" id="annotate-pagenums" placeholder="3, 4, 11"
+               autocomplete="off" spellcheck="false"
+               inputmode="numeric"></label>
       <div class="msg" id="msg-annotate-ids"></div>
+      <label class="inline"><input type="checkbox" id="annotate-grid">
+        Draw the grid it read against</label>
+      <p class="note">
+        Every cell the reader laid over the page, not just the bubbles it
+        acted on. This is what to look at when a sheet has been read wrongly
+        and it is not obvious why.
+      </p>
     </div>
 
     <h3>Thresholds</h3>

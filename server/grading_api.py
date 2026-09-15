@@ -182,6 +182,22 @@ def _parse_students(raw: str):
     return listed or None
 
 
+def _parse_numbers(raw: str):
+    """Read a "1,3,5" list of page numbers."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    wanted = []
+    for part in text.replace(";", ",").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.isdigit():
+            raise ValueError(f"'{part}' is not a page number.")
+        wanted.append(int(part))
+    return tuple(wanted) or None
+
+
 def _truthy(raw: str) -> bool:
     return (raw or "").strip().lower() in ("1", "true", "yes", "on")
 
@@ -336,6 +352,8 @@ def build_app():
                     threshold: str = Form(""),
                     annotate: str = Form("false"),
                     annotate_students: str = Form(""),
+                    annotate_pages: str = Form(""),
+                    annotate_grid: str = Form("false"),
                     tests: str = Form(""),
                     sides: str = Form(""),
                     skip_blanks: str = Form("false"),
@@ -380,6 +398,8 @@ def build_app():
                 threshold_spec=threshold or None,
                 annotate=_truthy(annotate),
                 annotate_students=_parse_students(annotate_students),
+                annotate_pages=_parse_numbers(annotate_pages),
+                annotate_grid=_truthy(annotate_grid),
                 tests=pipeline.parse_tests(
                     tests, sheet_layout.TESTS_PER_SHEET),
                 sides=wanted_sides,

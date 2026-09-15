@@ -479,6 +479,26 @@ def apply_overrides(rows: tp.Sequence[TestRow],
 # --- the run -------------------------------------------------------------
 
 
+class Adjustment(tp.NamedTuple):
+    """A test that had to be read some way other than by the batch cutoff.
+
+    Recorded so the calibration report can say it happened, rather than the
+    reader quietly doing something clever and nobody knowing.
+    """
+
+    kind: str
+    """``cutoff`` for a cutoff measured from this test alone, ``contrast`` for
+    rows judged against themselves."""
+
+    test_number: int
+    before: int
+    """Questions too close to call before."""
+    after: int
+    """...and after."""
+    value: float
+    """The cutoff used, or the unfilled-bubble reference."""
+
+
 class RunOptions(tp.NamedTuple):
     input_folder: pathlib.Path
     output_folder: pathlib.Path
@@ -491,6 +511,14 @@ class RunOptions(tp.NamedTuple):
     """Which papers get a marked-up copy: None for all of them,
     ``annotation.UNKNOWN_IDS`` for the ones whose Student ID could not be read
     in full, or the Student IDs to include."""
+
+    annotate_pages: tp.Optional[tp.Tuple[int, ...]] = None
+    """...or the page numbers to include, counted within their own file."""
+
+    annotate_grid: bool = False
+    """Draw the cell lattice the page was read against. The answer to "where
+    did it think the bubbles were", which ringed bubbles only give where a
+    bubble was acted on."""
 
     debug: bool = False
     sheet_text: tp.Optional[layout.SheetText] = None
@@ -596,17 +624,17 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
                ) -> tp.Tuple[tp.List[TestRow],
                              tp.List[review_module.UnclearRow],
                              tp.List[str], str, str,
-                             tp.List[tp.Tuple[int, int, int, float]]]:
+                             tp.List["Adjustment"]]:
     """Turn one measured page into result rows plus anything needing review.
 
-    The last item lists any test that had to be read against its own cutoff
-    rather than the batch's, as (test number, doubtful before, doubtful
-    after, cutoff), so the calibration report can say it happened.
+    The last item lists anything that had to be read other than by the
+    batch's own cutoff, so the calibration report can say it happened.
     """
     rows: tp.List[TestRow] = []
     unclear: tp.List[review_module.UnclearRow] = []
     missing: tp.List[str] = []
-    rescues: tp.List[tp.Tuple[int, int, int, float]] = []
+    rescues: tp.List[Adjustment] = []
+    contrasts: tp.List[Adjustment] = []
     page_number = page.page_index + 1
     name = page.path.name
 
@@ -676,13 +704,40 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
             if rescued is not None and th.unclear_count(questions, rescued) \
                     <= th.RESCUE_IMPROVEMENT * doubtful:
                 cutoffs = rescued
-                rescues.append((test_number, doubtful,
-                                th.unclear_count(questions, rescued),
-                                rescued.answer_select))
+                rescues.append(Adjustment(
+                    kind="cutoff", test_number=test_number, before=doubtful,
+                    after=th.unclear_count(questions, rescued),
+                    value=rescued.answer_select))
+
+        # Still doubtful, and the page is otherwise perfectly readable - the
+        # Test ID came through, so this is one student's pencil rather than a
+        # bad scan. Judge each question against its own row instead, using
+        # the ID blocks to say how dark an unfilled bubble gets here.
+        by_contrast: tp.Dict[int, tp.Set[str]] = {}
+        doubtful = th.unclear_count(questions, cutoffs)
+        if doubtful >= th.CONTRAST_MIN_UNCLEAR and "?" not in test_id \
+                and test_id:
+            reference = th.blank_reference(
+                list(scan.student_id)
+                + [digit for block in scan.test_id_digits for digit in block])
+            if reference is not None:
+                for index, group in enumerate(questions):
+                    decided = th.read_by_contrast(group, reference)
+                    if decided is not None:
+                        by_contrast[index] = decided
+                if by_contrast:
+                    contrasts.append(Adjustment(
+                        kind="contrast", test_number=test_number,
+                        before=doubtful,
+                        after=len(questions) - len(by_contrast),
+                        value=reference))
 
         marked: tp.List[tp.Set[str]] = []
         needs_review = False
-        for group in questions:
+        for index, group in enumerate(questions):
+            if index in by_contrast:
+                marked.append(by_contrast[index])
+                continue
             marked.append(group.selected(cutoffs))
             # A question left blank is the student's choice, not an error.
             if group.unclear(cutoffs):
@@ -699,7 +754,7 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
                     marked=marked,
                     needs_review=needs_review))
 
-    return rows, unclear, missing, own_id, latin_level, rescues
+    return rows, unclear, missing, own_id, latin_level, rescues + contrasts
 
 
 def run(options: RunOptions,
@@ -934,13 +989,22 @@ def run(options: RunOptions,
              page_rescues) = _interpret(
                 scan, page, batch_label, thresholds, front_id, front_level,
                 tests_before, options.tests)
-            for number, before, after, cutoff in page_rescues:
-                notes.append(
-                    f"{page.path.name} page {page.page_index + 1}, test "
-                    f"{number}: {before} of {len(scan.tests[0][1])} questions "
-                    "were too faint to call against the batch cutoff, so this "
-                    f"test was read against its own ({cutoff:.4f}), leaving "
-                    f"{after}.")
+            for item in page_rescues:
+                where = (f"{page.path.name} page {page.page_index + 1}, test "
+                         f"{item.test_number}")
+                if item.kind == "cutoff":
+                    notes.append(
+                        f"{where}: {item.before} questions were too faint to "
+                        "call against the batch cutoff, so this test was read "
+                        f"against its own ({item.value:.4f}), leaving "
+                        f"{item.after}.")
+                else:
+                    notes.append(
+                        f"{where}: {item.before} questions were too faint to "
+                        "call, so each row was judged against itself. An "
+                        f"unfilled bubble measures up to {item.value:.4f} on "
+                        f"this page; {item.after} rows were still too close "
+                        "to call and went to review.")
             if page.position_in_sheet == 0:
                 front_level = level
             rows.extend(page_rows)
@@ -1006,7 +1070,8 @@ def run(options: RunOptions,
         annotated = annotation.write_marked_up(
             image_paths, scans_by_page, sheets, rows, thresholds_by_file, keys,
             output / ANNOTATED_DIRNAME, console, options.tests,
-            options.annotate_students)
+            options.annotate_students, options.annotate_pages,
+            options.annotate_grid)
         written.extend(annotated)
 
     return RunResult(reports=reports,
