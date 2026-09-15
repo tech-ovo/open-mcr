@@ -331,17 +331,30 @@ def scan_page_either_side(image: tp.Any, form: grid_i.TwoSidedFormVariant,
 
 def read_digits(groups: tp.Sequence[BubbleGroup],
                 thresholds: th.Thresholds,
-                blank: str = "?") -> str:
+                blank: str = "?",
+                reference: tp.Optional[float] = None) -> str:
     """Join a digit block, keeping column positions.
 
     A column with nothing filled, or with more than one bubble filled, becomes
     `blank` rather than being guessed at, so `0?275` is never silently
     reported as the valid-looking `0275`.
+
+    With a `reference` - how dark an unfilled bubble gets on this page - a
+    column the cutoff could not resolve is tried again by contrast. Ten
+    bubbles with one filled is the clearest instance of that pattern on the
+    sheet, and it is the difference between a paper that can be handed back
+    and one that cannot.
     """
     characters: tp.List[str] = []
     for group in groups:
         chosen = sorted(group.selected(thresholds))
-        characters.append(chosen[0] if len(chosen) == 1 else blank)
+        if len(chosen) == 1:
+            characters.append(chosen[0])
+            continue
+        settled = (th.read_by_contrast(group, reference)
+                   if reference is not None else None)
+        characters.append(sorted(settled)[0]
+                          if settled and len(settled) == 1 else blank)
     return "".join(characters)
 
 

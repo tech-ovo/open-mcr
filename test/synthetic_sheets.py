@@ -286,5 +286,20 @@ def doodle_in_margin(page: np.ndarray) -> np.ndarray:
     return page
 
 
+def competing(test_index: int, question: int,
+              answers: tp.Sequence[str], count: int = 2
+              ) -> tp.List[tp.Tuple[int, int, str]]:
+    """Extra marks on other options of one question, to make it ambiguous.
+
+    A single faint bubble is not ambiguous - it towers over its neighbours and
+    is read as the answer, which is the whole point of judging a row against
+    itself. Genuine doubt looks like a pen dragged across several bubbles, so
+    that is what a test needing a review row has to produce.
+    """
+    intended = (answers[question - 1] or "").strip().upper()
+    others = [option for option in layout.OPTIONS if option != intended]
+    return [(test_index, question, option) for option in others[:count]]
+
+
 def answer_key(letter: str = "A") -> tp.List[str]:
     return [letter] * layout.QUESTIONS_PER_TEST

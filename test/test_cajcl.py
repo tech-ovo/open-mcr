@@ -680,7 +680,8 @@ def test_a_faint_mark_goes_to_the_unclear_sheet(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
                          test_ids=TEST_IDS,
                          answers=[cycled(0), cycled(1), cycled(2)],
-                         faint={0: [7]}, faint_fraction=0.5)
+                         faint={0: [7]}, faint_fraction=0.5,
+                         extra_marks=ss.competing(0, 7, cycled(0)))
     result, out = grade(tmp_path, [sheet], batch="3")
     assert result.unclear
     assert any(row.location == "7" for row in result.unclear)
@@ -965,12 +966,23 @@ def test_annotated_pdf_is_written(tmp_path):
 
 
 def _tick(path, columns=("B", "Done")):
+    """Fill in a review sheet the way a person would.
+
+    Ticking an option also unticks the others, because that is what settling a
+    row means: the machine pre-ticks whatever it read, and a row that reached
+    review usually has more than one of them ticked.
+    """
     rows = read_csv(path)
     header = rows[0]
+    chosen = [column for column in columns if column in layout.OPTIONS]
     for row in rows[1:]:
         for column in columns:
             if column in header:
                 row[header.index(column)] = "TRUE"
+        if chosen:
+            for option in layout.OPTIONS:
+                if option in header and option not in chosen:
+                    row[header.index(option)] = "FALSE"
     with open(path, "w", newline="", encoding="utf-8") as handle:
         csv.writer(handle).writerows(rows)
     return path
@@ -980,7 +992,8 @@ def test_overrides_are_folded_in(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
                          test_ids=TEST_IDS,
                          answers=[cycled(0), cycled(1), cycled(2)],
-                         faint={0: [7]}, faint_fraction=0.5)
+                         faint={0: [7]}, faint_fraction=0.5,
+                         extra_marks=ss.competing(0, 7, cycled(0)))
     result, out = grade(tmp_path, [sheet], batch="3")
     unclear_path = _tick(
         out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv")
@@ -997,7 +1010,8 @@ def test_an_unticked_review_row_is_refused(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
                          test_ids=TEST_IDS,
                          answers=[cycled(0), cycled(1), cycled(2)],
-                         faint={0: [7]}, faint_fraction=0.5)
+                         faint={0: [7]}, faint_fraction=0.5,
+                         extra_marks=ss.competing(0, 7, cycled(0)))
     _, out = grade(tmp_path, [sheet], batch="3")
     path = out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv"
     with pytest.raises(review.NotFinishedError, match="have been ticked"):
@@ -1008,7 +1022,8 @@ def test_a_correction_that_changes_nothing_is_not_counted(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
                          test_ids=TEST_IDS,
                          answers=[cycled(0), cycled(1), cycled(2)],
-                         faint={0: [7]}, faint_fraction=0.5)
+                         faint={0: [7]}, faint_fraction=0.5,
+                         extra_marks=ss.competing(0, 7, cycled(0)))
     _, out = grade(tmp_path, [sheet], batch="3")
     path = out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv"
     # Tick only Done, leaving every option unticked - which is exactly what
@@ -1131,7 +1146,9 @@ def test_an_untouched_row_still_needs_review_afterwards(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
                          test_ids=TEST_IDS,
                          answers=[cycled(0), cycled(1), cycled(2)],
-                         faint={0: [7], 1: [9]}, faint_fraction=0.5)
+                         faint={0: [7], 1: [9]}, faint_fraction=0.5,
+                         extra_marks=(ss.competing(0, 7, cycled(0))
+                                      + ss.competing(1, 9, cycled(1))))
     _, out = grade(tmp_path, [sheet], batch="3")
     rows = pipeline.read_results(out / pipeline.RESULTS_FILENAME)
     assert sum(1 for row in rows if row.needs_review) == 2
@@ -1153,7 +1170,9 @@ def test_outstanding_rows_come_back_for_a_second_round(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
                          test_ids=TEST_IDS,
                          answers=[cycled(0), cycled(1), cycled(2)],
-                         faint={0: [7], 1: [9]}, faint_fraction=0.5)
+                         faint={0: [7], 1: [9]}, faint_fraction=0.5,
+                         extra_marks=(ss.competing(0, 7, cycled(0))
+                                      + ss.competing(1, 9, cycled(1))))
     _, out = grade(tmp_path, [sheet], batch="3")
     original = out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv"
     rows = read_csv(original)
@@ -1180,7 +1199,8 @@ def test_ignoring_the_done_column_lets_an_unticked_sheet_through(tmp_path):
     sheet = ss.SheetData(student_id="04275", latin_level="HS-3",
                          test_ids=TEST_IDS,
                          answers=[cycled(0), cycled(1), cycled(2)],
-                         faint={0: [7]}, faint_fraction=0.5)
+                         faint={0: [7]}, faint_fraction=0.5,
+                         extra_marks=ss.competing(0, 7, cycled(0)))
     _, out = grade(tmp_path, [sheet], batch="3")
     path = out / f"Batch 3{review.BATCH_SEPARATOR}Unclear.csv"
     with pytest.raises(review.NotFinishedError):

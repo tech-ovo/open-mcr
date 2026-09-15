@@ -638,7 +638,16 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
     page_number = page.page_index + 1
     name = page.path.name
 
-    own_id = reading.read_digits(scan.student_id, thresholds)
+    # How dark an unfilled bubble gets on this page, from the digit blocks:
+    # nine of every ten bubbles there are blank by construction, and they have
+    # a character printed inside them exactly as an answer bubble has a
+    # letter. Used to rescue anything the flat cutoff cannot resolve.
+    reference = th.blank_reference(
+        list(scan.student_id)
+        + [digit for block in scan.test_id_digits for digit in block])
+
+    own_id = reading.read_digits(scan.student_id, thresholds,
+                                 reference=reference)
     student_id = front_id if (page.position_in_sheet > 0 and front_id) \
         else own_id
     latin_level = reading.read_choice(scan.latin_level, thresholds) \
@@ -683,7 +692,8 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
             continue
         digits = scan.test_id_digits[column_index] \
             if column_index < len(scan.test_id_digits) else ()
-        test_id = reading.read_digits(digits, thresholds)
+        test_id = reading.read_digits(digits, thresholds,
+                                      reference=reference)
         for group in digits:
             if group.unclear(thresholds):
                 note_unclear(group, test_id, test_number)
@@ -715,22 +725,24 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
         # the ID blocks to say how dark an unfilled bubble gets here.
         by_contrast: tp.Dict[int, tp.Set[str]] = {}
         doubtful = th.unclear_count(questions, cutoffs)
-        if doubtful >= th.CONTRAST_MIN_UNCLEAR and "?" not in test_id \
-                and test_id:
-            reference = th.blank_reference(
-                list(scan.student_id)
-                + [digit for block in scan.test_id_digits for digit in block])
-            if reference is not None:
-                for index, group in enumerate(questions):
-                    decided = th.read_by_contrast(group, reference)
-                    if decided is not None:
-                        by_contrast[index] = decided
-                if by_contrast:
-                    contrasts.append(Adjustment(
-                        kind="contrast", test_number=test_number,
-                        before=doubtful,
-                        after=len(questions) - len(by_contrast),
-                        value=reference))
+        if reference is not None:
+            for index, group in enumerate(questions):
+                # Every row, not only the flagged ones. On a faint paper
+                # "blank" and "too light to see" are the same measurement, and
+                # on a clear one contrast agrees with the cutoff anyway - it
+                # takes the darkest bubble and anything close behind it.
+                decided = th.read_by_contrast(group, reference)
+                if decided is not None:
+                    by_contrast[index] = decided
+            answered = sum(1 for marks in by_contrast.values() if marks)
+            if answered:
+                contrasts.append(Adjustment(
+                    kind="contrast", test_number=test_number,
+                    before=doubtful,
+                    after=th.unclear_count(
+                        [group for index, group in enumerate(questions)
+                         if index not in by_contrast], cutoffs),
+                    value=reference))
 
         marked: tp.List[tp.Set[str]] = []
         needs_review = False
@@ -952,6 +964,21 @@ def run(options: RunOptions,
     set_aside = [report for report in reports
                  if report.status in batching.SET_ASIDE]
     if not sheets:
+        # A whole batch of one side is not a mis-collation, it is a one-sided
+        # scan run with the wrong setting - and saying so saves the operator
+        # reading twenty identical complaints about page order.
+        readable = [report for report in reports
+                    if report.readable and not report.blank
+                    and report.side is not None]
+        sides_seen = {report.side for report in readable}
+        if len(options.sides) == 2 and len(sides_seen) == 1 and readable:
+            only = batching.SIDE_NAMES[sides_seen.pop()]
+            raise BreakingError(
+                f"Every page in this batch is a {only} page, so there are no "
+                "front-and-back pairs to make sheets from. If this scan holds "
+                f"only the {only} of each sheet, say so before grading: on "
+                f"the website, set 'which sides were scanned' to {only} only; "
+                f"on the command line, pass --sides {only}.")
         raise BreakingError(
             "Not one sheet in this batch could be read."
             + "".join(f"{NEWLINE}  {report.label}: {report.note}"
@@ -1071,7 +1098,7 @@ def run(options: RunOptions,
             image_paths, scans_by_page, sheets, rows, thresholds_by_file, keys,
             output / ANNOTATED_DIRNAME, console, options.tests,
             options.annotate_students, options.annotate_pages,
-            options.annotate_grid)
+            options.annotate_grid, unclear)
         written.extend(annotated)
 
     return RunResult(reports=reports,

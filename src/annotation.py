@@ -119,11 +119,18 @@ def _legend(image: np.ndarray, heading: str, scored: bool):
 
 def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
                   tests_before: int = 0, only_tests=None,
-                  show_grid: bool = False) -> np.ndarray:
+                  show_grid: bool = False, decided=None,
+                  in_review=None) -> np.ndarray:
     """Draw one page's reading onto a copy of the scan.
 
     ``keys`` maps a test number to the key it was scored against, so each
     column on the page is marked against its own answers.
+
+    ``decided`` maps a test number to the answers actually recorded for it,
+    and ``in_review`` to the question numbers that went to the review sheet.
+    Both come from the reader rather than being worked out again here: a test
+    may have been read against its own cutoff, or row by row, and a drawing
+    that quietly disagreed with the results would be believed over them.
     """
     annotated = image.copy()
     if annotated.ndim == 2:
@@ -161,14 +168,18 @@ def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
     # reading `key` afterwards raised UnboundLocalError.
     scored = False
     for column_index, (_, questions) in enumerate(scan.tests):
-        if only_tests is not None and \
-                tests_before + column_index + 1 not in only_tests:
+        number = tests_before + column_index + 1
+        if only_tests is not None and number not in only_tests:
             continue
-        key = keys.get(tests_before + column_index + 1) if keys else None
+        key = keys.get(number) if keys else None
         scored = scored or key is not None
         accepted_for = key.answers if key is not None else None
+        recorded = (decided or {}).get(number)
+        flagged = (in_review or {}).get(number)
         for index, group in enumerate(questions):
-            chosen = group.selected(thresholds)
+            chosen = (recorded[index] if recorded is not None
+                      and index < len(recorded)
+                      else group.selected(thresholds))
             alternatives = (accepted_for[index]
                             if accepted_for is not None and index < len(
                                 accepted_for) else ())
@@ -187,7 +198,9 @@ def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
             # Ring the printed question number rather than all five options:
             # five amber circles in a row say nothing about which one is the
             # problem, and drown out the answer they surround.
-            if group.unclear(thresholds) and group.marker is not None:
+            doubtful = (str(index + 1) in flagged if flagged is not None
+                        else group.unclear(thresholds))
+            if doubtful and group.marker is not None:
                 _ring(annotated, group.marker, UNCLEAR_COLOR)
 
     _legend(annotated, heading, scored=scored)
@@ -271,7 +284,7 @@ def wants_student(student: tp.Optional[str], only_students) -> bool:
 def write_marked_up(image_paths, scans_by_page, sheets, rows,
                     thresholds_by_file, keys, output_folder: pathlib.Path,
                     console, only_tests=None, only_students=None,
-                    only_pages=None, show_grid=False
+                    only_pages=None, show_grid=False, unclear=()
                     ) -> tp.List[pathlib.Path]:
     """One marked-up PDF per input file. Pages are re-read from the source and
     spooled to disk, so a large batch stays within bounded memory.
@@ -291,7 +304,17 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
     # answers.
     key_for_test: tp.Dict[tp.Tuple[str, int, int], tp.Any] = {}
     id_for_page: tp.Dict[tp.Tuple[str, int], str] = {}
+    # What the reader actually recorded, and what it sent to review.
+    marks_for_test: tp.Dict[tp.Tuple[str, int, int], tp.List] = {}
+    review_for_test: tp.Dict[tp.Tuple[str, int, int], tp.Set[str]] = {}
+    for item in unclear:
+        if item.location.isdigit():
+            review_for_test.setdefault(
+                (item.source_file, item.page, item.test_number),
+                set()).add(item.location)
     for row in rows:
+        marks_for_test[(row.source_file, row.page, row.test_number)] = \
+            row.marked
         id_for_page.setdefault((row.source_file, row.page), row.student_id)
         # row.key is the one the row was actually scored against; a Test ID
         # can name more than one.
@@ -349,10 +372,27 @@ def write_marked_up(image_paths, scans_by_page, sheets, rows,
                                 if (path.name, index + 1,
                                     number) in key_for_test
                             }
+                            span = range(before + 1,
+                                         before + len(scan.tests) + 1)
+                            decided = {
+                                number: marks_for_test[(path.name, index + 1,
+                                                        number)]
+                                for number in span
+                                if (path.name, index + 1,
+                                    number) in marks_for_test
+                            }
+                            flagged = {
+                                number: review_for_test.get(
+                                    (path.name, index + 1, number), set())
+                                for number in span
+                                if (path.name, index + 1,
+                                    number) in marks_for_test
+                            }
                             annotated = annotate_page(
                                 image, scan, thresholds_by_file[path],
                                 keys_here, heading, before, only_tests,
-                                show_grid=show_grid)
+                                show_grid=show_grid, decided=decided,
+                                in_review=flagged)
                             spool_path = spool / f"{len(spooled):05d}.jpg"
                             cv2.imwrite(str(spool_path), annotated,
                                         [int(cv2.IMWRITE_JPEG_QUALITY), 85])

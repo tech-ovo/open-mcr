@@ -241,7 +241,8 @@ def test_grade_reports_out_of_order_pages_as_422(client, tmp_path):
 
 
 def test_grade_surfaces_unclear_marks(client, tmp_path):
-    faint = one_student(faint={0: [7]}, faint_fraction=0.5)
+    faint = one_student(faint={0: [7]}, faint_fraction=0.5,
+                        extra_marks=ss.competing(0, 7, cycled(0)))
     response = client.post(
         "/grade",
         headers=auth(),
@@ -350,7 +351,8 @@ def test_regrade_rescores_without_scans(client, tmp_path):
 
 
 def test_regrade_refuses_unticked_review_rows(client, tmp_path):
-    faint = one_student(faint={0: [7]}, faint_fraction=0.5)
+    faint = one_student(faint={0: [7]}, faint_fraction=0.5,
+                        extra_marks=ss.competing(0, 7, cycled(0)))
     first = client.post(
         "/grade",
         headers=auth(),
@@ -372,7 +374,8 @@ def test_regrade_refuses_unticked_review_rows(client, tmp_path):
 
 
 def test_regrade_applies_a_ticked_correction(client, tmp_path):
-    faint = one_student(faint={0: [7]}, faint_fraction=0.5)
+    faint = one_student(faint={0: [7]}, faint_fraction=0.5,
+                        extra_marks=ss.competing(0, 7, cycled(0)))
     first = client.post(
         "/grade",
         headers=auth(),

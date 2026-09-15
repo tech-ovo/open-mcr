@@ -382,11 +382,6 @@ def rescue(fills: tp.Sequence[float], thresholds: Thresholds,
 
 # --- reading a question by contrast ---------------------------------------
 
-#: How many of a test's questions must be too close to call before its rows
-#: are read by contrast instead. A handful of borderline marks is ordinary;
-#: a run of them means the cutoff is in the wrong place for this paper.
-CONTRAST_MIN_UNCLEAR = 5
-
 #: How far above the known-unfilled reference a bubble must sit before it can
 #: be a deliberate mark at all. The floor this produces has to clear the
 #: darkest blank on the page without reaching the faintest real answer.
