@@ -1268,6 +1268,76 @@ def test_a_page_read_off_the_batch_s_grid_is_flagged(tmp_path):
                 if "away from where the rest" in report.note]
 
 
+# --- fields that take exactly one bubble -----------------------------------
+
+
+def _column(*fills):
+    """A digit column with the given darknesses, 0 through 9."""
+    return reading.BubbleGroup(
+        location="Student ID digit 1",
+        labels=tuple(str(digit) for digit in range(len(fills))),
+        fills=tuple(fills),
+        circles=tuple((0.0, 0.0, 1.0) for _ in fills),
+        is_answer=False, required=True)
+
+
+CUTOFFS = th.Thresholds(answer_select=0.50, answer_review=0.10,
+                        metadata_select=0.40, metadata_review=0.08)
+
+
+def test_one_faint_mark_settles_a_digit_column():
+    """Ten bubbles and one answer: a single mark is the answer, however
+    light. Demanding it also clear the cutoff asked a question nobody
+    needed."""
+    settled = reading.pick_one(_column(0.01, 0.22, 0.01, 0.0, 0.0), CUTOFFS)
+    assert settled.value == "1"
+    assert not settled.ambiguous and not settled.empty
+
+
+def test_a_confident_mark_outranks_a_smudge_beside_it():
+    """A firmly filled digit next to a speck is not a choice to be made."""
+    settled = reading.pick_one(_column(0.62, 0.11, 0.01, 0.0, 0.0), CUTOFFS)
+    assert settled.value == "0"
+    assert not settled.ambiguous
+
+
+def test_two_faint_marks_are_a_real_question():
+    settled = reading.pick_one(_column(0.24, 0.21, 0.01, 0.0, 0.0), CUTOFFS)
+    assert settled.value is None
+    assert settled.ambiguous
+
+
+def test_two_confident_marks_are_a_real_question():
+    settled = reading.pick_one(_column(0.62, 0.58, 0.01, 0.0, 0.0), CUTOFFS)
+    assert settled.value is None
+    assert settled.ambiguous
+
+
+def test_an_untouched_column_is_empty_not_doubtful():
+    settled = reading.pick_one(_column(0.01, 0.02, 0.0, 0.0, 0.0), CUTOFFS)
+    assert settled.value is None
+    assert settled.empty and not settled.ambiguous
+
+
+def test_a_faint_id_is_read_without_asking_anybody(tmp_path):
+    """End to end: a lightly bubbled Student ID should not reach review."""
+    sheet = ss.SheetData(student_id="04275", latin_level="MS-1",
+                         test_ids=TEST_IDS,
+                         answers=[cycled(0), cycled(1), cycled(2)])
+    pages = ss.render_sheet(sheet)
+    scans = tmp_path / "scans"
+    scans.mkdir(parents=True, exist_ok=True)
+    ss.write_pdf(pages, scans / "batch.pdf")
+    result = pipeline.run(
+        pipeline.RunOptions(input_folder=scans, output_folder=tmp_path / "out"),
+        console.Console(enabled=False))
+    assert {row.student_id for row in result.rows} == {"04275"}
+    # Nothing about the ID blocks should have been asked about.
+    assert not [item for item in result.unclear
+                if not item.location.isdigit()]
+    assert not result.missing
+
+
 # --- the student who presses lightly ---------------------------------------
 
 

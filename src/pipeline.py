@@ -672,19 +672,21 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
         if field not in missing:
             missing.append(field)
 
-    # Metadata: both blank and borderline are worth a person's time. A
-    # borderline bubble goes to the Unclear sheet naming the exact digit; a
-    # blank one only says that the whole field needs typing in again.
-    for group in scan.student_id:
-        if group.unclear(thresholds):
+    # Metadata: these columns take one bubble, so only two things are worth a
+    # person's time. Two marks in a column is a real choice and goes to the
+    # Unclear sheet naming the digit; none at all says the whole field needs
+    # typing in again. One mark, however light, is simply the answer.
+    def note_pick(group: reading.BubbleGroup, field: str):
+        settled = reading.pick_one(group, thresholds)
+        if settled.ambiguous:
             note_unclear(group, "")
-        elif len(group.selected(thresholds)) != 1:
-            note_missing("Student ID")
+        elif settled.empty:
+            note_missing(field)
+
+    for group in scan.student_id:
+        note_pick(group, "Student ID")
     if scan.latin_level is not None:
-        if scan.latin_level.unclear(thresholds):
-            note_unclear(scan.latin_level, "")
-        elif len(scan.latin_level.selected(thresholds)) != 1:
-            note_missing("Latin level")
+        note_pick(scan.latin_level, "Latin level")
 
     for column_index, (_, questions) in enumerate(scan.tests):
         test_number = tests_before + column_index + 1
@@ -695,9 +697,10 @@ def _interpret(scan: reading.PageScan, page: batching.PageRef, batch: str,
         test_id = reading.read_digits(digits, thresholds,
                                       reference=reference)
         for group in digits:
-            if group.unclear(thresholds):
+            settled = reading.pick_one(group, thresholds)
+            if settled.ambiguous:
                 note_unclear(group, test_id, test_number)
-            elif len(group.selected(thresholds)) != 1:
+            elif settled.empty:
                 note_missing(f"Test {test_number} ID")
 
         # A student who pressed lightly throughout leaves every one of their

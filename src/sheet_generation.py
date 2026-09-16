@@ -183,6 +183,61 @@ def _registration_marks(c: pdfcanvas.Canvas):
 # --- header, page code, collation mark -----------------------------------
 
 
+#: The worked examples: one bubble filled the way it should be, and the three
+#: ways people actually get it wrong. They sit on the page-code row, which is
+#: empty from the left margin to the middle of the sheet on both sides.
+EXAMPLE_ROW = layout.PAGE_CODE_ROW
+EXAMPLE_FIRST_COLUMN = 1
+EXAMPLE_LABEL_SIZE = 6.5
+#: Distance from one example to the next, in inches.
+EXAMPLE_PITCH = 0.72
+
+
+def _example_bubble(c: pdfcanvas.Canvas, x_in: float, y_in: float, kind: str):
+    """One example bubble, drawn at an arbitrary point on the page."""
+    radius = layout.bubble_radius_in()
+    c.saveState()
+    c.setLineWidth(BUBBLE_LINE_WIDTH)
+    c.setStrokeGray(_ink(c))
+    c.circle(x_in * inch, y_in * inch, radius * inch,
+             stroke=1, fill=1 if kind == "filled" else 0)
+    c.setStrokeGray(0.0)
+    c.setLineWidth(1.1)
+    if kind == "cross":
+        reach = radius * 0.62
+        c.line((x_in - reach) * inch, (y_in - reach) * inch,
+               (x_in + reach) * inch, (y_in + reach) * inch)
+        c.line((x_in - reach) * inch, (y_in + reach) * inch,
+               (x_in + reach) * inch, (y_in - reach) * inch)
+    elif kind == "tick":
+        c.line((x_in - radius * 0.5) * inch, y_in * inch,
+               (x_in - radius * 0.1) * inch, (y_in - radius * 0.55) * inch)
+        c.line((x_in - radius * 0.1) * inch, (y_in - radius * 0.55) * inch,
+               (x_in + radius * 0.6) * inch, (y_in + radius * 0.6) * inch)
+    elif kind == "part":
+        # A few strokes across one side, the way a bubble half-scribbled in a
+        # hurry actually looks.
+        for step in range(3):
+            offset = radius * (0.45 - step * 0.35)
+            c.line((x_in - radius * 0.55) * inch, (y_in + offset) * inch,
+                   (x_in + radius * 0.15) * inch, (y_in + offset) * inch)
+    c.restoreState()
+
+
+def _marking_examples(c: pdfcanvas.Canvas):
+    """A filled bubble beside the three ways it is usually got wrong."""
+    radius = layout.bubble_radius_in()
+    x0, y = layout.cell_to_inches(EXAMPLE_FIRST_COLUMN, EXAMPLE_ROW + 0.5)
+    entries = (("filled", "YES"), ("cross", "NO"), ("tick", "NO"),
+               ("part", "NO"))
+    c.setFont(SERIF_BOLD, EXAMPLE_LABEL_SIZE)
+    for index, (kind, label) in enumerate(entries):
+        x = x0 + index * EXAMPLE_PITCH
+        _example_bubble(c, x, y, kind)
+        c.drawString((x + radius + 0.045) * inch,
+                     (y - 0.032) * inch, label)
+
+
 def _header(c: pdfcanvas.Canvas, text: layout.SheetText):
     """The title, and the one line about marking that has to be read.
 
@@ -192,6 +247,7 @@ def _header(c: pdfcanvas.Canvas, text: layout.SheetText):
     _, y = layout.cell_to_inches(0, TITLE_ROW)
     _text_centered(c, layout.PAGE_WIDTH_IN / 2, y, text.title, size=11,
                    font=SERIF_BOLD, char_space=1.4)
+    _marking_examples(c)
     if text.marking_note:
         _, note_y = layout.cell_to_inches(0, MARKING_NOTE_ROW)
         _text_centered(c, layout.PAGE_WIDTH_IN / 2, note_y,

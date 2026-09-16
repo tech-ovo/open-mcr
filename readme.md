@@ -46,7 +46,8 @@ answer sheet.
 | **A page report** | `Pages.csv` lists every page that went in and what became of it — graded, blank, unreadable, unpaired, ID mismatch, wrong side — so "did every paper come back?" has an answer without anyone having to notice a warning. |
 | **Damaged corner marks** | A mark scribbled over, or filled in solid, still reads. The page is thresholded darker and tried again (printed marks survive a cutoff that drops graphite); a corner that is buried entirely is reconstructed from the other three, since the fourth corner of a rectangle is not a guess; and failing both, the marks are found by position alone. |
 | **A grid that is checked before it is believed** | The recovered grid has to be a *rectangle* of the sheet's proportions, with its corners on the page. Equal opposite sides are not enough — a sheared parallelogram has those — so the diagonals are compared too. A wrong grid reads every bubble in the wrong place while looking perfectly self-consistent, and this is what catches it. |
-| **Faint marks read by contrast** | A student whose pressure varies threefold across one test defeats any single cutoff. Where a test is mostly borderline, each question is judged against its own row instead: the intended bubble is twenty or thirty times darker than its neighbours even when it is far below the cutoff. The known-unfilled bubbles of the ID blocks say how dark blank gets on that page. |
+| **Faint marks read by contrast** | A student whose pressure varies threefold across one test defeats any single cutoff. Each question is judged against its own row instead: the intended bubble is twenty or thirty times darker than its neighbours even when it is far below the cutoff. The known-unfilled bubbles of the ID blocks say how dark blank gets on that page. |
+| **One-bubble fields read as one bubble** | A Latin level or an ID digit is ten bubbles with one answer, so a single mark settles it however light it is. Only two things go to review: nothing at all, and more than one. |
 | **One-sided scans** | `--sides front` grades a stack of front pages a page at a time instead of in pairs, and `--skip-blanks` passes over the empty reverses a duplex scanner produces for them. |
 | **Calibrated thresholds** | The filled/blank cutoff is measured from the scans themselves, once per PDF, so a different scanner needs no retuning. Printed to `Calibration.txt` and overridable with `--threshold`. |
 | **A plain cutoff, so `AB` is readable** | A bubble is filled when it is dark enough - never "the darkest of the five" - so a student who means A *and* B is read as `AB`. |
@@ -132,10 +133,12 @@ exposes it. Measured on the generated sheet:
 **Every sheet in a batch has to be printed at the same value**, since it moves
 what "blank" means. Leave it alone unless you are reprinting.
 
-The sheet also carries a line under the title about what a readable mark looks
-like — `SheetText.marking_note`, and editable in step 2. Everything the reader
-finds difficult is settled before the paper is collected: a hard pencil, a tick
-instead of a filled bubble, an erasure left half on the page.
+The sheet also shows, on the page-code row, a bubble filled the way it should
+be beside the three ways it is usually got wrong: a cross, a tick, and a
+half-scribble, labelled YES and NO. Everything the reader finds difficult is
+settled before the paper is collected, and four bubbles say so without being
+read. `SheetText.marking_note` adds a line of prose underneath if you want one;
+it is empty by default.
 
 ### Answer keys
 
@@ -485,8 +488,9 @@ glance.
 
 Two things go to review, and only two:
 
-- **Unclear** — a bubble dark enough to be a real attempt but too light to
-  count. Neither selected nor ignored; a person decides.
+- **Unclear** — a genuine question: a row with several marks in it, or a
+  one-bubble field with two. A single faint mark is not unclear; it is the
+  answer, and is read as one.
 - **Missing** — a *required* field that could not be read: the Student ID,
   the Latin level, a Test ID. **A blank question is not an error** — that is
   the student's choice, and it is simply recorded as blank.

@@ -20,6 +20,7 @@ import cv2
 import numpy as np
 
 from . import image_utils
+from . import reading
 from . import sheet_layout as layout
 
 GRID_ACROSS = layout.GRID_COLUMNS
@@ -140,24 +141,22 @@ def annotate_page(image: np.ndarray, scan, thresholds, keys, heading: str,
     if show_grid and getattr(scan, "corners", None):
         _draw_grid(annotated, scan.corners, GRID_ACROSS, GRID_DOWN)
 
-    select = thresholds.metadata_select
-    review = thresholds.metadata_review
-
-    # Metadata: ring whatever was read as filled, and only the individual
-    # bubbles that were too close to call - never the whole block.
+    # Metadata: these columns take one bubble, so they are drawn by the same
+    # rule the reader used - one mark is the answer however light it is, two
+    # are a question, none is a gap. Working it out again here is what had a
+    # single faint digit ringed amber *and* boxed at the same time.
     for group in scan.all_groups():
         if group.is_answer:
             continue
-        chosen = group.selected(thresholds)
+        settled = reading.pick_one(group, thresholds)
         # Nothing filled in a field that needs a value: box the whole group, so
         # the empty column is visible rather than merely unmarked.
-        if group.required and not chosen:
+        if group.required and settled.empty:
             _box(annotated, group.circles, UNCLEAR_COLOR)
-        for label, fill, circle in zip(group.labels, group.fills,
-                                       group.circles):
-            if label in chosen:
+        for label, circle in zip(group.labels, group.circles):
+            if label == settled.value:
                 _ring(annotated, circle, READ_COLOR)
-            elif review <= fill <= select:
+            elif settled.ambiguous and label in settled.candidates:
                 _ring(annotated, circle, UNCLEAR_COLOR)
 
     # Answers. A test left out of the run was never read, so there is

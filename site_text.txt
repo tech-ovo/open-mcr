@@ -59,7 +59,7 @@ That link contains the invite from step 1 as well as everything in this step. Se
 Bubble darkness
 How dark the bubbles themselves are printed. An empty bubble is not blank paper — it is a printed ring with a letter inside it — so this is the floor every reading sits on, and printing it lighter leaves more room between an untouched bubble and a lightly-pencilled one. Every sheet in a batch must be printed at the same setting.
 Note to students
-One line under the title, where somebody about to fill the sheet in will read it. Leave it empty to print nothing.
+The sheet already shows a filled bubble beside the three ways it is usually got wrong — a cross, a tick, and a half-scribble — which is read without reading. This adds a line of your own underneath. Most sheets do not need one.
 Printing
 Print double-sided (your printer may call this duplex).
 Use 100% scale if possible. ‘Fit to page’ is acceptable if your printer requires it, but it makes the bubbles smaller.

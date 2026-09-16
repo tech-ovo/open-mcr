@@ -182,12 +182,10 @@ DEFAULT_DIRECTIONS: tp.Tuple[str, ...] = (
 DEFAULT_WRITE_IN_LABELS: tp.Tuple[str, ...] = ("First Name", "Last Name",
                                                "School")
 
-#: Printed under the title, where a student will actually read it. Everything
-#: the reader finds difficult is settled here: a hard pencil, a tick instead
-#: of a filled bubble, an erasure left half on the page.
-DEFAULT_MARKING_NOTE = (
-    "Fill each bubble completely, in dark pencil or black or blue pen. "
-    "A tick, a cross or a light mark may not be read.")
+#: An optional extra line under the worked examples. Empty by default: the
+#: examples say it without being read, and a sentence underneath them is one
+#: more thing for a student in a hurry to skip.
+DEFAULT_MARKING_NOTE = ""
 
 #: Room for that line before it runs past the edges of the answer columns.
 MAX_MARKING_NOTE_LENGTH = 130

@@ -329,6 +329,48 @@ def scan_page_either_side(image: tp.Any, form: grid_i.TwoSidedFormVariant,
     return _extract(grid, variant, latin_levels, side)
 
 
+class PickOne(tp.NamedTuple):
+    """How a one-bubble field read."""
+
+    value: tp.Optional[str]
+    """The label chosen, or None when the column could not be settled."""
+
+    candidates: tp.Tuple[str, ...]
+    """Every label carrying more than a blank bubble's worth of ink."""
+
+    @property
+    def empty(self) -> bool:
+        """Nobody filled anything in."""
+        return not self.candidates
+
+    @property
+    def ambiguous(self) -> bool:
+        """Two or more marks, so a person has to say which was meant."""
+        return len(self.candidates) > 1
+
+
+def pick_one(group: BubbleGroup, thresholds: th.Thresholds) -> PickOne:
+    """Read a field where exactly one bubble is meant to be filled.
+
+    Judged against the *review* threshold rather than the cutoff. These
+    columns hold one answer among nine blanks, so a single mark anywhere above
+    the noise is the answer; demanding that it also clear the cutoff only
+    turns a light pencil into a question nobody needed to be asked.
+    """
+    cutoff = thresholds.select_for(group.is_answer)
+    review = thresholds.review_for(group.is_answer)
+    strong = tuple(label for label, fill in zip(group.labels, group.fills)
+                   if fill > cutoff)
+    # A bubble that clears the cutoff on its own settles the column, whatever
+    # faint company it keeps: a smudge beside a firmly filled digit is not a
+    # choice anybody needs to make. Only two confident marks are.
+    if strong:
+        return PickOne(strong[0] if len(strong) == 1 else None, strong)
+    above = tuple(label for label, fill in zip(group.labels, group.fills)
+                  if fill > review)
+    return PickOne(above[0] if len(above) == 1 else None, above)
+
+
 def read_digits(groups: tp.Sequence[BubbleGroup],
                 thresholds: th.Thresholds,
                 blank: str = "?",
@@ -345,17 +387,8 @@ def read_digits(groups: tp.Sequence[BubbleGroup],
     sheet, and it is the difference between a paper that can be handed back
     and one that cannot.
     """
-    characters: tp.List[str] = []
-    for group in groups:
-        chosen = sorted(group.selected(thresholds))
-        if len(chosen) == 1:
-            characters.append(chosen[0])
-            continue
-        settled = (th.read_by_contrast(group, reference)
-                   if reference is not None else None)
-        characters.append(sorted(settled)[0]
-                          if settled and len(settled) == 1 else blank)
-    return "".join(characters)
+    return "".join(pick_one(group, thresholds).value or blank
+                   for group in groups)
 
 
 def read_choice(group: tp.Optional[BubbleGroup],
@@ -364,8 +397,7 @@ def read_choice(group: tp.Optional[BubbleGroup],
     reads as an empty string."""
     if group is None:
         return ""
-    chosen = sorted(group.selected(thresholds))
-    return chosen[0] if len(chosen) == 1 else ""
+    return pick_one(group, thresholds).value or ""
 
 
 def read_page_side(scan: PageScan,
